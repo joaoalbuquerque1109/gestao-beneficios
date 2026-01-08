@@ -5,25 +5,66 @@ import { Users, DollarSign, AlertTriangle, Calendar } from 'lucide-react'
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  // Busca dados reais do banco
-  const { count: totalEmployees } = await supabase
+  // 1. Busca Salários e Contagem dos Ativos
+  // ALTERAÇÃO: Removemos 'head: true' e selecionamos a coluna 'salary' para poder somar
+  const { data: activeEmployees, count: totalEmployees } = await supabase
     .from('employees')
-    .select('*', { count: 'exact', head: true })
+    .select('salary', { count: 'exact' }) 
     .eq('status', 'ATIVO')
 
-  // Simulação de outros dados (migraremos a lógica de cálculo depois)
+  // 2. Cálculo da Soma dos Salários (Folha Estimada)
+  const totalSalary = activeEmployees?.reduce((acc, curr) => {
+    return acc + (Number(curr.salary) || 0)
+  }, 0) || 0
+
+  // 3. Formatação para Moeda (BRL)
+  const formattedEstimate = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(totalSalary)
+
+  // 4. Definição do Período Atual (Mês/Ano por extenso)
+  const currentDate = new Date()
+  const currentPeriod = currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const formattedPeriod = currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)
+
+  // 5. Montagem dos Cards (Mantendo o Layout Original)
   const stats = {
     totalEmployees: totalEmployees || 0,
-    totalEstimated: 0, // Implementaremos o cálculo real depois
-    alerts: 0,
-    currentPeriod: new Date().toISOString().slice(0, 7) // YYYY-MM
+    totalEstimated: formattedEstimate,
+    alerts: 0, // Lógica de alertas pode ser implementada futuramente (ex: cadastros incompletos)
+    period: formattedPeriod
   }
 
   const kpiCards = [
-    { label: 'Funcionários Ativos', value: stats.totalEmployees, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Estimativa Mensal', value: 'R$ 0,00', icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'Alertas de Cesta', value: stats.alerts, icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { label: 'Período Atual', value: stats.currentPeriod, icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { 
+      label: 'Funcionários Ativos', 
+      value: stats.totalEmployees, 
+      icon: Users, 
+      color: 'text-blue-600', 
+      bg: 'bg-blue-50' 
+    },
+    { 
+      label: 'Estimativa Mensal', 
+      value: stats.totalEstimated, 
+      icon: DollarSign, 
+      color: 'text-green-600', 
+      bg: 'bg-green-50' 
+    },
+    { 
+      label: 'Alertas de Cesta', 
+      value: stats.alerts, 
+      icon: AlertTriangle, 
+      color: 'text-orange-600', 
+      bg: 'bg-orange-50' 
+    },
+    { 
+      label: 'Período Atual', 
+      value: stats.period, 
+      icon: Calendar, 
+      color: 'text-purple-600', 
+      bg: 'bg-purple-50' 
+    },
   ]
 
   return (
@@ -32,7 +73,7 @@ export default async function DashboardPage() {
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpiCards.map((card, idx) => (
-          <div key={idx} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div key={idx} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-sm font-medium text-slate-500">{card.label}</p>
@@ -47,7 +88,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500">
-        <p>Os gráficos e cálculos detalhados serão implementados na próxima etapa.</p>
+        <p>Os gráficos e cálculos detalhados de benefícios serão implementados na próxima etapa.</p>
       </div>
     </div>
   )
