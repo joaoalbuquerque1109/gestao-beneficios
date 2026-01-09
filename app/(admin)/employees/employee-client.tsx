@@ -361,9 +361,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <select className="w-full border p-2 rounded bg-white" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                         <option value="ATIVO">ATIVO</option>
                         <option value="INATIVO">INATIVO</option>
-                        <option value="AFASTADO_INSS">AFASTADO INSS</option>
-                        <option value="AFASTADO_DOENCA">AFASTADO DOENCA</option>
+                        <option value="AFASTADO INSS">AFASTADO INSS</option>
+                        <option value="AFASTADO DOENCA">AFASTADO DOENCA</option>
                         <option value="DEMITIDO">DEMITIDO</option>
+                        <option value="MATERNIDADE">MATERNIDADE</option>
                     </select>
                 </div>
 

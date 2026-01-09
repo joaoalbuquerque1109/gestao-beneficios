@@ -9,9 +9,11 @@ export async function saveAbsencesBatch(absences: any[]) {
 
   // Mapeia para o formato do banco (snake_case)
   const records = absences.map(a => ({
-    employee_id: a.employeeId,
+    employee_id: a.employeeId, // Certifique-se que seu Excel/Form envia isso
     date: a.date,
-    reason: a.reason
+    reason: a.reason,
+    // CORREÇÃO: Salva o tipo da falta. Se não vier, assume JUSTIFICADA para não prejudicar o funcionário
+    type: a.type ? a.type.toUpperCase() : 'JUSTIFICADA' 
   }))
 
   const { error } = await supabase.from('absences').insert(records)
