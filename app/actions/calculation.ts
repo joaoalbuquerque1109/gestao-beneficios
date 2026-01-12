@@ -2,90 +2,132 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { calculateBenefit } from '@/services/benefit-calculation'
+import { getCalculationRange, getBusinessDaysBetween } from '@/utils/date-helpers'
 
 export async function processPeriod(periodInput: string, userEmail: string) {
   const supabase = await createClient()
   let targetId = periodInput
+  let periodName = periodInput
 
-  // --- PASSO 1: Resolver o UUID do Período ---
-  // Verifica se o input é um UUID válido. Se NÃO for (ex: "2026-01"), precisamos buscar o ID no banco.
+  // --- PASSO 1: Resolver Período ---
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(periodInput)
-
   if (!isUUID) {
-    // 1. Tenta encontrar o período pelo nome (Ex: "2026-01")
-    const { data: existingPeriod } = await supabase
-      .from('periods')
-      .select('id')
-      .eq('name', periodInput)
-      .single()
-
+    const { data: existingPeriod } = await supabase.from('periods').select('id, name').eq('name', periodInput).single()
     if (existingPeriod) {
       targetId = existingPeriod.id
+      periodName = existingPeriod.name
     } else {
-      // 2. Se não existir, CRIA um novo período automaticamente
-      const { data: newPeriod, error: createError } = await supabase
-        .from('periods')
-        .insert({ 
-          name: periodInput,   // Salva "2026-01" na coluna name
-          status: 'RASCUNHO',
-          total_employees: 0,
-          total_value: 0
-        })
-        .select('id')
-        .single()
-      
-      if (createError) {
-        return { error: 'Erro ao criar período: ' + createError.message }
-      }
+      const { data: newPeriod, error: createError } = await supabase.from('periods')
+        .insert({ name: periodInput, status: 'RASCUNHO', total_employees: 0, total_value: 0 })
+        .select('id, name').single()
+      if (createError) return { error: 'Erro ao criar período: ' + createError.message }
       targetId = newPeriod.id
+      periodName = newPeriod.name
     }
+  } else {
+    const { data: p } = await supabase.from('periods').select('name').eq('id', targetId).single()
+    if (p) periodName = p.name
   }
 
-  // --- PASSO 2: Executar o Cálculo (RPC) usando o UUID correto ---
-  const { error: rpcError } = await supabase.rpc('calculate_benefits_batch', {
-    target_period_id: targetId
+  // --- PASSO 2: Configurações e Dados ---
+  const { data: config, error: configError } = await supabase.from('global_config').select('*').single()
+  if (configError || !config) return { error: 'Erro crítico: Configurações globais não encontradas.' }
+
+  const DAILY_VALUE_VA = Number(config.daily_value_va) || 15.00
+  const BASKET_VALUE = Number(config.basket_value) || 142.05
+  const BASKET_LIMIT = Number(config.basket_limit) || 1780.00
+  const STANDARD_BUSINESS_DAYS = Number(config.business_days) || 22
+
+  // A. Intervalo de Ponto (para buscar Faltas Avulsas)
+  // Ex: 15/Dez a 14/Jan
+  const { start: absencesStart, end: absencesEnd } = getCalculationRange(periodName, config.cutoff_day || 15)
+
+  // B. Intervalo Civil (para calcular proporção de Férias do Mês)
+  // Ex: 01/Jan a 31/Jan - Isso corrige o erro de descontar dias de Dezembro!
+  const [pYear, pMonth] = periodName.split('-').map(Number)
+  const monthStart = new Date(pYear, pMonth - 1, 1)
+  const monthEnd = new Date(pYear, pMonth, 0) // Último dia do mês
+
+  // Busca funcionários (mesmo os Inativos que trabalharam no período)
+  const { data: employees, error: empError } = await supabase
+    .from('employees').select('*').not('status', 'eq', 'INATIVO')
+  if (empError) return { error: 'Erro ao buscar funcionários: ' + empError.message }
+
+  // Busca Faltas Avulsas (usando a janela de ponto)
+  const { data: absences, error: absError } = await supabase
+    .from('absences').select('*').gte('date', absencesStart).lte('date', absencesEnd)
+  if (absError) return { error: 'Erro ao buscar ausências: ' + absError.message }
+
+  // --- PASSO 3: Cálculo ---
+  const resultsToInsert = employees.map(employee => {
+    // A. Faltas Manuais (Olha a janela de ponto: 15 a 14)
+    const empAbsences = absences?.filter(a => a.employee_id === employee.employee_id) || []
+    const manualUnjustified = empAbsences.filter(a => a.type === 'INJUSTIFICADA').length
+    const manualJustified = empAbsences.filter(a => a.type === 'JUSTIFICADA').length
+
+    // B. Cálculo de Férias (Olha o mês civil: 01 a 31)
+    let vacationDays = 0
+    if (employee.status_start_date && employee.status_end_date) {
+        const statusStart = new Date(employee.status_start_date)
+        const statusEnd = new Date(employee.status_end_date)
+
+        // Intersecção com o MÊS ATUAL (monthStart a monthEnd)
+        // Isso impede que dias de Dezembro sejam descontados em Janeiro
+        const interStart = statusStart > monthStart ? statusStart : monthStart
+        const interEnd = statusEnd < monthEnd ? statusEnd : monthEnd
+
+        if (interStart <= interEnd) {
+            vacationDays = getBusinessDaysBetween(interStart, interEnd)
+        }
+    }
+
+    const totalJustified = manualJustified + vacationDays
+
+    const calculation = calculateBenefit({
+      employee,
+      unjustifiedAbsences: manualUnjustified,
+      justifiedAbsences: totalJustified,
+      workingDays: STANDARD_BUSINESS_DAYS,
+      dailyValueVA: DAILY_VALUE_VA,
+      basketValue: BASKET_VALUE,
+      basketLimit: BASKET_LIMIT,
+      periodId: periodName
+    })
+
+    return {
+      period_id: targetId,
+      employee_id: employee.employee_id,
+      employee_name: employee.name,
+      days_worked: calculation.daysWorked,
+      va_value: calculation.vaValue,
+      basket_value: calculation.basketValue,
+      total_receivable: calculation.total,
+      calculation_details: { 
+          ...calculation.debug, 
+          vacationDaysCalculated: vacationDays,
+          vacationRangeUsed: { start: monthStart, end: monthEnd } 
+      }
+    }
   })
 
-  if (rpcError) {
-    console.error('Erro no RPC:', rpcError)
-    return { error: 'Falha no processamento: ' + rpcError.message }
+  // --- PASSO 4: Salvar ---
+  await supabase.from('period_results').delete().eq('period_id', targetId)
+  if (resultsToInsert.length > 0) {
+    const { error: insertError } = await supabase.from('period_results').insert(resultsToInsert)
+    if (insertError) return { error: 'Erro ao salvar resultados: ' + insertError.message }
   }
 
-  // --- PASSO 3: Atualizar Totais e Status ---
-  // Busca os totais calculados na tabela period_results
-  const { data: results, error: sumError } = await supabase
-    .from('period_results')
-    .select('total_receivable')
-    .eq('period_id', targetId)
-
-  if (sumError) {
-    return { error: 'Erro ao totalizar resultados: ' + sumError.message }
-  }
-
-  const totalValue = results?.reduce((acc, curr) => acc + (Number(curr.total_receivable) || 0), 0) || 0
-  const count = results?.length || 0
-
-  // Atualiza o status do período para PROCESSADO
-  const { error: updateError } = await supabase
-    .from('periods')
-    .update({ 
+  // --- PASSO 5: Totais ---
+  const totalValue = resultsToInsert.reduce((acc, curr) => acc + curr.total_receivable, 0)
+  await supabase.from('periods').update({ 
         status: 'PROCESSADO',
-        total_employees: count,
+        total_employees: resultsToInsert.length,
         total_value: totalValue,
         processed_by: userEmail,
         processed_at: new Date().toISOString()
-    })
-    .eq('id', targetId)
-  
-  if (updateError) {
-    return { error: 'Erro ao atualizar status do período: ' + updateError.message }
-  }
+    }).eq('id', targetId)
 
   revalidatePath('/calculation')
-  
-  return { 
-    success: true, 
-    count: count, 
-    total: totalValue 
-  }
+  return { success: true, count: resultsToInsert.length, total: totalValue }
 }

@@ -3,16 +3,26 @@ import { getBusinessDaysBetween } from '@/utils/date-helpers';
 
 interface CalcParams {
   employee: any;
-  absencesCount: number;
+  unjustifiedAbsences: number; // Faltas Injustificadas (Afetam Cesta e VA)
+  justifiedAbsences: number;   // Férias, Atestados, INSS (Afetam apenas VA)
   workingDays: number;
-  dailyValueVA: number; // R$ 15.00
-  basketValue: number;  // R$ 142.05
-  basketLimit: number;  // R$ 1780.00
+  dailyValueVA: number;
+  basketValue: number;
+  basketLimit: number;
   periodId: string;
 }
 
 export const calculateBenefit = (params: CalcParams) => {
-  const { employee, absencesCount, workingDays, dailyValueVA, basketValue, basketLimit, periodId } = params;
+  const { 
+    employee, 
+    unjustifiedAbsences, 
+    justifiedAbsences, 
+    workingDays, 
+    dailyValueVA, 
+    basketValue, 
+    basketLimit, 
+    periodId 
+  } = params;
   
   // 1. Regra de Admissão Proporcional
   let effectiveDays = workingDays;
@@ -30,9 +40,12 @@ export const calculateBenefit = (params: CalcParams) => {
     }
   }
 
-  // 2. Cálculo VA (Dias Úteis - Faltas)
+  // 2. Cálculo VA (Dias Úteis - Faltas Totais)
+  // O VA deve ser descontado por QUALQUER dia não trabalhado (Injustificado ou Justificado/Férias)
+  const totalAbsences = unjustifiedAbsences + justifiedAbsences;
+  
   const vaPotential = effectiveDays * dailyValueVA;
-  const vaDiscount = absencesCount * dailyValueVA;
+  const vaDiscount = totalAbsences * dailyValueVA;
   const vaFinal = Math.max(0, vaPotential - vaDiscount);
 
   // 3. Cálculo Cesta (Regra do Teto e Escalonamento de Faltas)
@@ -47,11 +60,12 @@ export const calculateBenefit = (params: CalcParams) => {
     }
 
     // Regra de Penalidade por Faltas
-    // 1 falta = 25% desc, 2 faltas = 50% desc, 3+ faltas = 100% desc (perde tudo)
+    // Apenas faltas INJUSTIFICADAS aplicam penalidade na cesta
+    // 1 falta = 25% desc, 2 faltas = 50% desc, 3+ faltas = 100% desc
     let penalty = 0;
-    if (absencesCount === 1) penalty = 0.25;
-    else if (absencesCount === 2) penalty = 0.50;
-    else if (absencesCount >= 3) penalty = 1.00;
+    if (unjustifiedAbsences === 1) penalty = 0.25;
+    else if (unjustifiedAbsences === 2) penalty = 0.50;
+    else if (unjustifiedAbsences >= 3) penalty = 1.00;
 
     basketFinal = Math.max(0, baseValue * (1 - penalty));
   }
@@ -60,6 +74,7 @@ export const calculateBenefit = (params: CalcParams) => {
     daysWorked: effectiveDays,
     vaValue: vaFinal,
     basketValue: basketFinal,
-    total: vaFinal + basketFinal
+    total: vaFinal + basketFinal,
+    debug: { totalAbsences, unjustifiedAbsences, penaltyApplied: unjustifiedAbsences >= 1 }
   };
 };

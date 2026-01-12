@@ -16,7 +16,8 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
   const admissionDate = data.admissionDate ? data.admissionDate : null
   const birthDate = data.birthDate ? data.birthDate : null
   
-  // Tratamento das Novas Datas de Status
+  // Tratamento das Datas de Status
+  // IMPORTANTE: Mantemos as datas mesmo se o status for ATIVO
   const statusStartDate = data.statusStartDate ? data.statusStartDate : null
   const statusEndDate = data.statusEndDate ? data.statusEndDate : null
 
@@ -32,30 +33,24 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
     admission_date: admissionDate,
     birth_date: birthDate,
     status: data.status,
-    // Novos campos de controle de afastamento/férias
+    // As datas são salvas independente do status atual
     status_start_date: statusStartDate,
     status_end_date: statusEndDate
   }
 
-  // REGRA DE LIMPEZA:
-  // Se o status NÃO for temporário, forçamos as datas a serem NULL.
-  // Isso evita que fique "lixo" no banco se você mudar de FÉRIAS para ATIVO.
-  const TEMPORARY_STATUSES = ["AFASTADO INSS", "AFASTADO DOENCA", "FERIAS", "MATERNIDADE"];
-  if (!TEMPORARY_STATUSES.includes(data.status)) {
-     employeeData.status_start_date = null;
-     employeeData.status_end_date = null;
-  }
+  // --- REMOVIDA A REGRA DE LIMPEZA QUE APAGAVA AS DATAS ---
+  // Antes existia um bloco 'if' aqui que forçava as datas para null
+  // se o status fosse ATIVO. Isso foi removido para corrigir o cálculo.
 
   if (isEdit) {
     // --- EDIÇÃO ---
-    // Busca dados antigos para registrar o que mudou no log
     const { data: oldEmp } = await supabase.from('employees').select('*').eq('id', data.id).single()
     
     const { error } = await supabase.from('employees').update(employeeData).eq('id', data.id)
     
     if (error) return { error: error.message }
 
-    // Log de alteração simples (focando em salário por enquanto)
+    // Log de alteração simples
     if (oldEmp && oldEmp.salary !== employeeData.salary) {
         await supabase.from('movements').insert([{
         employee_id: data.id,
@@ -74,7 +69,6 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
     
     if (error) return { error: error.message }
 
-    // Log de admissão
     await supabase.from('movements').insert([{
       employee_id: data.id,
       employee_name: data.name,
@@ -104,8 +98,6 @@ export async function importEmployeesBatch(employees: any[], user: string) {
     admission_date: e.admissionDate,
     birth_date: e.birthDate,
     status: e.status
-    // Nota: A importação em massa básica geralmente não traz datas de férias,
-    // mas se precisar, adicione status_start_date aqui no futuro.
   }))
 
   const { error } = await supabase.from('employees').upsert(records)
@@ -116,12 +108,11 @@ export async function importEmployeesBatch(employees: any[], user: string) {
   return { success: true, count: records.length }
 }
 
-// --- EXCLUSÃO (COM LIMPEZA) ---
+// --- EXCLUSÃO ---
 export async function deleteEmployee(id: string, name: string, userName: string) {
   const supabase = await createClient()
   const currentMonth = new Date().toISOString().slice(0, 7)
 
-  // 1. Registrar LOG de exclusão antes de apagar
   await supabase.from('movements').insert([{
     employee_id: id,
     employee_name: name,
@@ -132,12 +123,10 @@ export async function deleteEmployee(id: string, name: string, userName: string)
     reference_month: currentMonth
   }])
 
-  // 2. Limpeza de Dependências (Para evitar erro de Foreign Key)
   await supabase.from('period_results').delete().eq('employee_id', id)
   await supabase.from('adjustments').delete().eq('employee_id', id)
   await supabase.from('absences').delete().eq('employee_id', id)
 
-  // 3. Apagar o Funcionário finalmente
   const { error } = await supabase.from('employees').delete().eq('id', id)
   
   if (error) {

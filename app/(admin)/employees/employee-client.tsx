@@ -11,7 +11,6 @@ import {
 import * as XLSX from 'xlsx'
 import { differenceInBusinessDays, parseISO, isValid } from 'date-fns'
 
-// Adicionei globalConfig nas props para pegar o valor do VA
 export default function EmployeeClient({ initialEmployees, departments, locations, user, globalConfig }: any) {
   const [employees] = useState(initialEmployees)
   const [search, setSearch] = useState('')
@@ -25,15 +24,15 @@ export default function EmployeeClient({ initialEmployees, departments, location
 
   const [isEditMode, setIsEditMode] = useState(false)
   
-  // Estado atualizado com datas de status
+  // Estado
   const [formData, setFormData] = useState({
     id: '', name: '', cpf: '', role: '', salary: 0, 
     department: '', location: '', status: 'ATIVO',
     admissionDate: '', birthDate: '',
-    statusStartDate: '', statusEndDate: '' // Novos campos
+    statusStartDate: '', statusEndDate: ''
   })
 
-  // Status que exigem preenchimento de data
+  // Status que exibem os campos de data na tela
   const STATUS_TEMPORARIOS = [
     "AFASTADO INSS", 
     "AFASTADO DOENCA", 
@@ -41,14 +40,12 @@ export default function EmployeeClient({ initialEmployees, departments, location
     "MATERNIDADE"
   ]
 
-  // Resetar para página 1 quando pesquisar
   useEffect(() => {
     setCurrentPage(1)
   }, [search])
 
   // --- LÓGICA DE CÁLCULO DE IMPACTO ---
   const calculateImpact = () => {
-    // Só calcula se o status exigir e tivermos as duas datas
     if (!STATUS_TEMPORARIOS.includes(formData.status) || !formData.statusStartDate || !formData.statusEndDate) {
       return null
     }
@@ -57,15 +54,9 @@ export default function EmployeeClient({ initialEmployees, departments, location
     const end = parseISO(formData.statusEndDate)
     
     if (!isValid(start) || !isValid(end)) return null;
-
-    // Se data final for menor que inicial, ignora
     if (end < start) return null;
 
-    // Calcula dias úteis (para VA)
-    // Adicionamos +1 pois se começa dia 1 e termina dia 1, é 1 dia de trabalho
     const businessDaysOff = differenceInBusinessDays(end, start) + 1; 
-    
-    // Pega o valor do VA da configuração global (ou 0 se não tiver)
     const dailyVa = Number(globalConfig?.daily_value_va || 0);
     const vaLoss = businessDaysOff * dailyVa;
 
@@ -87,10 +78,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
         }
         if (typeof val === 'string') {
             if (val.includes('/')) {
-                const parts = val.trim().split('/') // DD/MM/YYYY
+                const parts = val.trim().split('/') 
                 if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`
             }
-            if (val.includes('-')) return val.trim() // Já está em YYYY-MM-DD
+            if (val.includes('-')) return val.trim() 
         }
     } catch (e) {
         return null
@@ -216,7 +207,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
         id: emp.id, name: emp.name, cpf: emp.cpf, role: emp.role, salary: emp.salary,
         department: emp.department_id, location: emp.location_id, status: emp.status,
         admissionDate: emp.admission_date || '', birthDate: emp.birth_date || '',
-        // Preenche as datas se existirem no banco
         statusStartDate: emp.status_start_date || '', 
         statusEndDate: emp.status_end_date || ''
     })
@@ -229,12 +219,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
     setLoading(true)
     setLoadingMessage('Salvando...')
     
-    // Limpa as datas se o status não for temporário (para não salvar lixo no banco)
+    // --- CORREÇÃO IMPORTANTE ---
+    // Removemos a lógica que limpava as datas se o status não fosse temporário.
+    // Agora enviamos as datas mesmo se o status for ATIVO, preservando o histórico para o cálculo.
     const dataToSave = { ...formData }
-    if (!STATUS_TEMPORARIOS.includes(dataToSave.status)) {
-        dataToSave.statusStartDate = ''
-        dataToSave.statusEndDate = ''
-    }
 
     const res = await saveEmployee(dataToSave, user.email || 'Admin', isEditMode)
     if (res.error) alert('Erro: ' + res.error)
@@ -265,7 +253,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
 
   return (
     <div className="space-y-6">
-      {/* LOADING OVERLAY */}
       {loading && (
         <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-50 text-white">
             <Loader2 size={48} className="animate-spin mb-4" />
@@ -273,7 +260,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       )}
 
-      {/* HEADER E BOTÕES (Sem alterações) */}
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <h2 className="text-2xl font-bold text-slate-800">Base de Funcionários</h2>
         <div className="flex flex-wrap gap-2">
@@ -293,7 +279,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       </div>
 
-      {/* SEARCH BAR (Sem alterações) */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={20} />
@@ -310,7 +295,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       </div>
 
-      {/* TABELA (Sem alterações) */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
@@ -361,7 +345,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </table>
         </div>
 
-        {/* PAGINAÇÃO */}
         {totalItems > 0 && (
             <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
                 <span className="text-sm text-slate-500">
@@ -380,7 +363,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
         )}
       </div>
 
-      {/* MODAL EDITAR / NOVO */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
@@ -392,7 +374,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-2 gap-4">
-                {/* Campos Padrão */}
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Matrícula</label>
                     <input required disabled={isEditMode} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100" 
@@ -450,7 +431,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     </select>
                 </div>
 
-                {/* --- SEÇÃO CONDICIONAL DE DATAS --- */}
                 {STATUS_TEMPORARIOS.includes(formData.status) && (
                     <div className="col-span-2 bg-slate-50 p-4 rounded-lg border border-slate-200 mt-2 animate-in fade-in slide-in-from-top-2">
                         <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
@@ -480,7 +460,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
                             </div>
                         </div>
 
-                        {/* Card de Impacto Financeiro em Tempo Real */}
                         {impact && (
                             <div className="mt-4 p-3 bg-orange-50 border border-orange-100 rounded text-sm text-orange-900">
                                 <p className="font-bold flex items-center gap-2 mb-1">
