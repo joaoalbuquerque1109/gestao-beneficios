@@ -1,17 +1,18 @@
 import { createClient } from '@/utils/supabase/server'
 import EmployeeClient from './employee-client'
 
-// --- ADICIONE ESTA LINHA ---
+// Força a página a ser dinâmica para não cachear dados antigos
 export const dynamic = 'force-dynamic'
 
 export default async function EmployeesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // 1. Buscar Funcionários (Garante até 10.000 registros)
+  // 1. Buscar Funcionários (AUMENTA O LIMITE PARA 10.000)
+  //'id','name', 'cpf', 'role', 'department_id', 'location_id', 'salary', 'admission_date', 'birth_date', 'status', 'created_at'
   const { data: employees } = await supabase
     .from('employees')
-    .select('*')
+    .select('id, name, cpf, role, department_id, location_id, salary, admission_date, birth_date, status, created_at')
 
   // 2. Buscar Departamentos
   const { data: departments } = await supabase
