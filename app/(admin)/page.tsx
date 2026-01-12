@@ -1,12 +1,13 @@
 import { createClient } from '@/utils/supabase/server'
-import { Users, DollarSign, AlertTriangle, Calendar, Building2, UserX, Baby } from 'lucide-react'
+import { Users, DollarSign, AlertTriangle, Calendar, Building2, UserX } from 'lucide-react'
 
-// Tipagem atualizada com 'maternity'
+// Tipagem atualizada
 type DashboardStats = {
   active: number
   inss: number
   sick: number
-  maternity: number // Novo campo
+  maternity: number
+  vacation: number
   fired: number
   inactive: number
   total: number
@@ -23,14 +24,13 @@ type DepartmentCost = {
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  // 1. Chamada RPC: Busca todas as estatísticas
+  // 1. Chamada RPC: Busca todas as estatísticas gerais
   const { data: statsData, error: statsError } = await supabase
     .rpc('get_dashboard_stats')
 
-  // 2. Chamada View: Busca lista de custos
+  // 2. Chamada RPC: Busca lista de custos POR SECRETARIA (Agora usa a função inteligente)
   const { data: deptData, error: deptError } = await supabase
-    .from('view_department_costs')
-    .select('*')
+    .rpc('get_department_costs') 
 
   if (statsError || deptError) {
     console.error("Erro no dashboard:", statsError || deptError)
@@ -38,7 +38,7 @@ export default async function DashboardPage() {
 
   // Inicializa com zeros caso falhe
   const stats = (statsData as unknown as DashboardStats) || {
-    active: 0, inss: 0, sick: 0, maternity: 0, fired: 0, inactive: 0, total: 0, total_estimated: 0
+    active: 0, inss: 0, sick: 0, maternity: 0, vacation: 0, fired: 0, inactive: 0, total: 0, ticket_value: 0, total_estimated: 0
   }
   
   const departmentCosts = (deptData as DepartmentCost[]) || []
@@ -85,11 +85,12 @@ export default async function DashboardPage() {
     },
   ]
 
-  // Cards de Situação (Atualizado com Maternidade)
+  // Cards de Situação
   const statusCards = [
     { label: 'INSS', value: stats.inss, color: 'text-slate-600', border: 'border-slate-200' },
+    { label: 'Férias', value: stats.vacation, color: 'text-teal-600', border: 'border-teal-200' },
     { label: 'Afastado Doença', value: stats.sick, color: 'text-red-600', border: 'border-red-200' },
-    { label: 'Licença Maternidade', value: stats.maternity, color: 'text-pink-600', border: 'border-pink-200' }, // Novo Card
+    { label: 'Licença Maternidade', value: stats.maternity, color: 'text-pink-600', border: 'border-pink-200' },
     { label: 'Demitidos', value: stats.fired, color: 'text-gray-600', border: 'border-gray-200' },
     { label: 'Inativos', value: stats.inactive, color: 'text-slate-400', border: 'border-slate-200' },
   ]

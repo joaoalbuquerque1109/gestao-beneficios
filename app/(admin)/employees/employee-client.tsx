@@ -6,11 +6,13 @@ import { useState, useEffect } from 'react'
 import { saveEmployee, deleteEmployee, importEmployeesBatch } from '@/app/actions/employees'
 import { 
   Plus, Search, Trash2, Pencil, Upload, Download, FileDown, X, UserPlus, Loader2,
-  ChevronLeft, ChevronRight 
+  ChevronLeft, ChevronRight, CalendarClock, AlertTriangle
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { differenceInBusinessDays, parseISO, isValid } from 'date-fns'
 
-export default function EmployeeClient({ initialEmployees, departments, locations, user }: any) {
+// Adicionei globalConfig nas props para pegar o valor do VA
+export default function EmployeeClient({ initialEmployees, departments, locations, user, globalConfig }: any) {
   const [employees] = useState(initialEmployees)
   const [search, setSearch] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -22,16 +24,58 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const itemsPerPage = 20
 
   const [isEditMode, setIsEditMode] = useState(false)
+  
+  // Estado atualizado com datas de status
   const [formData, setFormData] = useState({
     id: '', name: '', cpf: '', role: '', salary: 0, 
     department: '', location: '', status: 'ATIVO',
-    admissionDate: '', birthDate: ''
+    admissionDate: '', birthDate: '',
+    statusStartDate: '', statusEndDate: '' // Novos campos
   })
+
+  // Status que exigem preenchimento de data
+  const STATUS_TEMPORARIOS = [
+    "AFASTADO INSS", 
+    "AFASTADO DOENCA", 
+    "FERIAS", 
+    "MATERNIDADE"
+  ]
 
   // Resetar para página 1 quando pesquisar
   useEffect(() => {
     setCurrentPage(1)
   }, [search])
+
+  // --- LÓGICA DE CÁLCULO DE IMPACTO ---
+  const calculateImpact = () => {
+    // Só calcula se o status exigir e tivermos as duas datas
+    if (!STATUS_TEMPORARIOS.includes(formData.status) || !formData.statusStartDate || !formData.statusEndDate) {
+      return null
+    }
+
+    const start = parseISO(formData.statusStartDate)
+    const end = parseISO(formData.statusEndDate)
+    
+    if (!isValid(start) || !isValid(end)) return null;
+
+    // Se data final for menor que inicial, ignora
+    if (end < start) return null;
+
+    // Calcula dias úteis (para VA)
+    // Adicionamos +1 pois se começa dia 1 e termina dia 1, é 1 dia de trabalho
+    const businessDaysOff = differenceInBusinessDays(end, start) + 1; 
+    
+    // Pega o valor do VA da configuração global (ou 0 se não tiver)
+    const dailyVa = Number(globalConfig?.daily_value_va || 0);
+    const vaLoss = businessDaysOff * dailyVa;
+
+    return {
+      days: businessDaysOff,
+      vaLoss: vaLoss
+    }
+  }
+
+  const impact = calculateImpact()
 
   // --- HELPER DE DATA ---
   const excelDateToISO = (val: any) => {
@@ -54,26 +98,22 @@ export default function EmployeeClient({ initialEmployees, departments, location
     return null
   }
 
-  // --- IMPORTAÇÃO CORRIGIDA ---
+  // --- IMPORTAÇÃO ---
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return
-    
     const file = e.target.files[0]
     e.target.value = '' 
-    
     setLoading(true)
     setLoadingMessage('Lendo arquivo...')
     
     try {
       const data = await file.arrayBuffer()
       const workbook = XLSX.read(data)
-      
       let targetSheetName = workbook.SheetNames[0]
       let worksheet = workbook.Sheets[targetSheetName]
       let jsonData: any[] = XLSX.utils.sheet_to_json(worksheet)
       
       const hasMatricula = jsonData.length > 0 && ('Matrícula' in jsonData[0] || 'Matricula' in jsonData[0])
-      
       if (!hasMatricula) {
         const modeloSheet = workbook.SheetNames.find(n => n.toLowerCase().includes('modelo'))
         if (modeloSheet) {
@@ -103,22 +143,19 @@ export default function EmployeeClient({ initialEmployees, departments, location
       const validEmployees = parsedEmployees.filter((e: any) => e.id && e.id !== 'undefined' && e.name)
 
       if (validEmployees.length === 0) {
-        alert(`Erro: Nenhuma coluna "Matrícula" encontrada na aba "${targetSheetName}".`)
+        alert(`Erro: Nenhuma coluna "Matrícula" encontrada.`)
         setLoading(false)
         return
       }
 
       setLoadingMessage(`Salvando ${validEmployees.length} funcionários...`)
-
       const res = await importEmployeesBatch(validEmployees, user.email || 'Admin')
       
-      if (res.error) {
-        alert('Erro ao salvar no banco:\n' + res.error)
-      } else {
+      if (res.error) alert('Erro ao salvar no banco:\n' + res.error)
+      else {
         alert(`Sucesso! ${res.count} funcionários importados.`)
         window.location.reload()
       }
-
     } catch (err: any) {
       console.error(err)
       alert('Erro crítico: ' + err.message)
@@ -127,34 +164,23 @@ export default function EmployeeClient({ initialEmployees, departments, location
     }
   }
 
-  // --- LÓGICA DE FILTRO E PAGINAÇÃO ---
+  // --- FILTRO E PAGINAÇÃO ---
   const filtered = employees.filter((e: any) => 
     e.name.toLowerCase().includes(search.toLowerCase()) || 
     e.id.includes(search)
   )
 
-  // Calcula índices
   const totalItems = filtered.length
   const totalPages = Math.ceil(totalItems / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = startIndex + itemsPerPage
-  
-  // Pega apenas os itens da página atual para exibir
   const currentData = filtered.slice(startIndex, endIndex)
 
   const handleExport = () => {
-    // Exporta TODOS os filtrados, não apenas a página atual
     const dataToExport = filtered.map((e: any) => ({
-      'Matrícula': e.id,
-      'Nome Completo': e.name,
-      'CPF': e.cpf,
-      'Cargo': e.role,
-      'Secretaria': e.department_id,
-      'Filial': e.location_id,
-      'Salário Base': e.salary,
-      'Status': e.status,
-      'Data de Admissão': e.admission_date,
-      'Data de Nascimento': e.birth_date
+      'Matrícula': e.id, 'Nome Completo': e.name, 'CPF': e.cpf, 'Cargo': e.role,
+      'Secretaria': e.department_id, 'Filial': e.location_id, 'Salário Base': e.salary,
+      'Status': e.status, 'Data de Admissão': e.admission_date, 'Data de Nascimento': e.birth_date
     }))
     const ws = XLSX.utils.json_to_sheet(dataToExport)
     const wb = XLSX.utils.book_new()
@@ -164,9 +190,9 @@ export default function EmployeeClient({ initialEmployees, departments, location
 
   const handleDownloadTemplate = () => {
     const template = [{
-      'Matrícula': '12345', 'Nome Completo': 'TESTE DA SILVA', 'CPF': '000.000.000-00', 
+      'Matrícula': '12345', 'Nome Completo': 'TESTE', 'CPF': '000.000.000-00', 
       'Cargo': 'ASSISTENTE', 'Secretaria': 'EDUCACAO', 'Filial': 'SEDE', 
-      'Salário Base': 1412.00, 'Status': 'ATIVO', 'Data de Admissão': '01/01/2024', 'Data de Nascimento': '01/01/1990'
+      'Salário Base': 1412.00, 'Status': 'ATIVO', 'Data de Admissão': '2024-01-01', 'Data de Nascimento': '1990-01-01'
     }]
     const ws = XLSX.utils.json_to_sheet(template)
     const wb = XLSX.utils.book_new()
@@ -178,7 +204,8 @@ export default function EmployeeClient({ initialEmployees, departments, location
     setFormData({
         id: '', name: '', cpf: '', role: '', salary: 0, 
         department: departments[0]?.id || '', location: locations[0]?.id || '', status: 'ATIVO',
-        admissionDate: '', birthDate: ''
+        admissionDate: '', birthDate: '',
+        statusStartDate: '', statusEndDate: ''
     })
     setIsEditMode(false)
     setIsModalOpen(true)
@@ -188,7 +215,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
     setFormData({
         id: emp.id, name: emp.name, cpf: emp.cpf, role: emp.role, salary: emp.salary,
         department: emp.department_id, location: emp.location_id, status: emp.status,
-        admissionDate: emp.admission_date || '', birthDate: emp.birth_date || ''
+        admissionDate: emp.admission_date || '', birthDate: emp.birth_date || '',
+        // Preenche as datas se existirem no banco
+        statusStartDate: emp.status_start_date || '', 
+        statusEndDate: emp.status_end_date || ''
     })
     setIsEditMode(true)
     setIsModalOpen(true)
@@ -198,7 +228,15 @@ export default function EmployeeClient({ initialEmployees, departments, location
     e.preventDefault()
     setLoading(true)
     setLoadingMessage('Salvando...')
-    const res = await saveEmployee(formData, user.email || 'Admin', isEditMode)
+    
+    // Limpa as datas se o status não for temporário (para não salvar lixo no banco)
+    const dataToSave = { ...formData }
+    if (!STATUS_TEMPORARIOS.includes(dataToSave.status)) {
+        dataToSave.statusStartDate = ''
+        dataToSave.statusEndDate = ''
+    }
+
+    const res = await saveEmployee(dataToSave, user.email || 'Admin', isEditMode)
     if (res.error) alert('Erro: ' + res.error)
     else {
       alert(isEditMode ? 'Atualizado!' : 'Cadastrado!')
@@ -235,9 +273,9 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       )}
 
+      {/* HEADER E BOTÕES (Sem alterações) */}
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <h2 className="text-2xl font-bold text-slate-800">Base de Funcionários</h2>
-        
         <div className="flex flex-wrap gap-2">
             <button onClick={handleOpenNew} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm font-bold">
                 <Plus size={18} /> Novo
@@ -255,6 +293,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       </div>
 
+      {/* SEARCH BAR (Sem alterações) */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={20} />
@@ -271,6 +310,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       </div>
 
+      {/* TABELA (Sem alterações) */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
@@ -299,7 +339,8 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <td className="px-6 py-3 font-mono">{formatCurrency(emp.salary)}</td>
                     <td className="px-6 py-3">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        emp.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        emp.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 
+                        emp.status === 'INATIVO' ? 'bg-slate-100 text-slate-500' : 'bg-orange-100 text-orange-700'
                     }`}>
                         {emp.status}
                     </span>
@@ -320,31 +361,18 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </table>
         </div>
 
-        {/* --- CONTROLES DE PAGINAÇÃO --- */}
+        {/* PAGINAÇÃO */}
         {totalItems > 0 && (
             <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
                 <span className="text-sm text-slate-500">
                     Mostrando <b>{startIndex + 1}</b> a <b>{Math.min(endIndex, totalItems)}</b> de <b>{totalItems}</b>
                 </span>
-                
                 <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                        disabled={currentPage === 1}
-                        className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
-                    >
+                    <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="p-2 border rounded-lg hover:bg-white disabled:opacity-50">
                         <ChevronLeft size={16}/>
                     </button>
-                    
-                    <span className="text-sm font-medium px-2">
-                        Página {currentPage} de {totalPages}
-                    </span>
-
-                    <button 
-                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                        disabled={currentPage === totalPages}
-                        className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
-                    >
+                    <span className="text-sm font-medium px-2">Página {currentPage} de {totalPages}</span>
+                    <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="p-2 border rounded-lg hover:bg-white disabled:opacity-50">
                         <ChevronRight size={16}/>
                     </button>
                 </div>
@@ -352,16 +380,19 @@ export default function EmployeeClient({ initialEmployees, departments, location
         )}
       </div>
 
+      {/* MODAL EDITAR / NOVO */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center sticky top-0">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     <UserPlus size={20} /> {isEditMode ? 'Editar Funcionário' : 'Novo Cadastro'}
                 </h3>
                 <button onClick={() => setIsModalOpen(false)}><X size={24} className="text-slate-400 hover:text-red-500"/></button>
             </div>
+            
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-2 gap-4">
+                {/* Campos Padrão */}
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Matrícula</label>
                     <input required disabled={isEditMode} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100" 
@@ -405,17 +436,69 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <input type="number" step="0.01" required className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500" 
                         value={formData.salary} onChange={e => setFormData({...formData, salary: parseFloat(e.target.value)})} />
                 </div>
+                
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Status</label>
-                    <select className="w-full border p-2 rounded bg-white" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                    <select className="w-full border p-2 rounded bg-white font-medium text-slate-700" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                         <option value="ATIVO">ATIVO</option>
                         <option value="INATIVO">INATIVO</option>
                         <option value="AFASTADO INSS">AFASTADO INSS</option>
                         <option value="AFASTADO DOENCA">AFASTADO DOENCA</option>
-                        <option value="DEMITIDO">DEMITIDO</option>
+                        <option value="FERIAS">FERIAS</option>
                         <option value="MATERNIDADE">MATERNIDADE</option>
+                        <option value="DEMITIDO">DEMITIDO</option>
                     </select>
                 </div>
+
+                {/* --- SEÇÃO CONDICIONAL DE DATAS --- */}
+                {STATUS_TEMPORARIOS.includes(formData.status) && (
+                    <div className="col-span-2 bg-slate-50 p-4 rounded-lg border border-slate-200 mt-2 animate-in fade-in slide-in-from-top-2">
+                        <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                           <CalendarClock size={16} /> Período do Evento
+                        </h4>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs text-slate-500 mb-1">Data Início</label>
+                                <input 
+                                    type="date" 
+                                    required
+                                    value={formData.statusStartDate}
+                                    onChange={(e) => setFormData({...formData, statusStartDate: e.target.value})}
+                                    className="block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-500 mb-1">Data Fim</label>
+                                <input 
+                                    type="date" 
+                                    required
+                                    value={formData.statusEndDate}
+                                    onChange={(e) => setFormData({...formData, statusEndDate: e.target.value})}
+                                    className="block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Card de Impacto Financeiro em Tempo Real */}
+                        {impact && (
+                            <div className="mt-4 p-3 bg-orange-50 border border-orange-100 rounded text-sm text-orange-900">
+                                <p className="font-bold flex items-center gap-2 mb-1">
+                                    <AlertTriangle size={14} className="text-orange-600" />
+                                    Impacto Estimado
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 text-xs">
+                                    <li>
+                                        Ausência: <strong>{impact.days} dias úteis</strong>.
+                                    </li>
+                                    <li>
+                                        Desconto VA estimado: <strong>{formatCurrency(impact.vaLoss)}</strong>
+                                    </li>
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Admissão</label>
