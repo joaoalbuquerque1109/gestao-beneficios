@@ -6,7 +6,6 @@ import {
   Save, Settings as SettingsIcon, Calendar, Building, MapPin, List, 
   Plus, Trash2, Lock, Unlock, AlertTriangle, Database, RefreshCw, FileX 
 } from 'lucide-react'
-// CORREÇÃO: Importando o nome correto 'updateGlobalSettings'
 import { updateGlobalSettings, manageListItem, togglePeriodStatus, resetSystem } from '@/app/actions/settings'
 
 export default function SettingsClient({ initialConfig, departments, locations, statuses, periods, user }: any) {
@@ -18,7 +17,8 @@ export default function SettingsClient({ initialConfig, departments, locations, 
     basketValue: initialConfig.basket_value,
     basketLimit: initialConfig.basket_limit,
     cutoffDay: initialConfig.cutoff_day,
-    workingDays: 22 // Default visual
+    // CORREÇÃO: Agora puxa do banco. Se vier nulo (banco antigo), usa 22 como fallback.
+    businessDays: initialConfig.business_days || 22
   })
 
   // Inputs locais para as listas
@@ -30,7 +30,6 @@ export default function SettingsClient({ initialConfig, departments, locations, 
 
   const handleSaveGlobal = async () => {
     setLoading(true)
-    // CORREÇÃO: Chamando a função com o nome correto
     await updateGlobalSettings(formData, user.email || 'Admin')
     setLoading(false)
     alert('Parâmetros salvos com sucesso!')
@@ -85,28 +84,28 @@ export default function SettingsClient({ initialConfig, departments, locations, 
             <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Valor Diário (VA)</label>
                 <input type="number" step="0.01" className="w-full border p-2 rounded text-black" 
-                    value={formData.dailyValueVA} onChange={e => setFormData({...formData, dailyValueVA: e.target.value})} />
+                    value={formData.dailyValueVA} onChange={e => setFormData({...formData, dailyValueVA: Number(e.target.value)})} />
             </div>
             <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Valor Cesta</label>
                 <input type="number" step="0.01" className="w-full border p-2 rounded text-black" 
-                    value={formData.basketValue} onChange={e => setFormData({...formData, basketValue: e.target.value})} />
+                    value={formData.basketValue} onChange={e => setFormData({...formData, basketValue: Number(e.target.value)})} />
             </div>
             <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Teto Salarial Cesta</label>
                 <input type="number" step="0.01" className="w-full border p-2 rounded text-black" 
-                    value={formData.basketLimit} onChange={e => setFormData({...formData, basketLimit: e.target.value})} />
+                    value={formData.basketLimit} onChange={e => setFormData({...formData, basketLimit: Number(e.target.value)})} />
             </div>
             <div className="flex gap-4">
                 <div className="flex-1">
                     <label className="block text-xs font-bold text-slate-500 mb-1">Dias Úteis Padrão</label>
                     <input type="number" className="w-full border p-2 rounded text-black" 
-                        value={formData.workingDays} onChange={e => setFormData({...formData, workingDays: Number(e.target.value)})} />
+                        value={formData.businessDays} onChange={e => setFormData({...formData, businessDays: Number(e.target.value)})} />
                 </div>
                 <div className="flex-1">
                     <label className="block text-xs font-bold text-slate-500 mb-1">Dia Fechamento</label>
                     <input type="number" className="w-full border p-2 rounded text-black" 
-                        value={formData.cutoffDay} onChange={e => setFormData({...formData, cutoffDay: e.target.value})} />
+                        value={formData.cutoffDay} onChange={e => setFormData({...formData, cutoffDay: Number(e.target.value)})} />
                     <p className="text-[10px] text-slate-400 mt-1">Dia do corte mensal (Ex: 15)</p>
                 </div>
             </div>
@@ -131,8 +130,9 @@ export default function SettingsClient({ initialConfig, departments, locations, 
                 <tbody className="divide-y">
                     {periods.map((p: any) => (
                         <tr key={p.id}>
-                            <td className="p-2 font-medium text-black">{p.id}</td>
-                            <td className="p-2 text-black">{p.working_days}</td>
+                            <td className="p-2 font-medium text-black">{p.name || p.id}</td>
+                            {/* Mostra se o período salvou um snapshot dos dias úteis, se tiver essa coluna na tabela periods */}
+                            <td className="p-2 text-black">{p.working_days || '-'}</td>
                             <td className="p-2 text-right">
                                 <button onClick={() => handleTogglePeriod(p.id, p.is_open)} 
                                     className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ml-auto w-fit ${p.is_open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>

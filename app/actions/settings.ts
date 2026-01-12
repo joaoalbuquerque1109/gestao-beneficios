@@ -9,6 +9,7 @@ export type UpdateSettingsData = {
   basketValue: number
   basketLimit: number
   cutoffDay: number
+  businessDays: number // NOVO CAMPO
 }
 
 // --- 1. Configuração Global ---
@@ -19,6 +20,7 @@ export async function updateGlobalSettings(data: UpdateSettingsData, userName: s
       basket_value: data.basketValue,
       basket_limit: data.basketLimit,
       cutoff_day: data.cutoffDay,
+      business_days: data.businessDays, // Salva o novo campo
       updated_by: userName,
       updated_at: new Date().toISOString()
     }).eq('id', 1)
@@ -35,7 +37,6 @@ export async function manageListItem(table: 'departments' | 'locations' | 'emplo
   let error = null
 
   if (action === 'ADD') {
-    // Normaliza ID: Remove espaços e acentos, Uppercase
     const id = data.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, '_')
     const { error: err } = await supabase.from(table).insert([{ id, name: data.name.toUpperCase(), status: 'ATIVO' }])
     error = err
@@ -45,7 +46,6 @@ export async function manageListItem(table: 'departments' | 'locations' | 'emplo
     error = err
   }
   else if (action === 'TOGGLE') {
-    // Inverte status ATIVO <-> INATIVO
     const newStatus = data.currentStatus === 'ATIVO' ? 'INATIVO' : 'ATIVO'
     const { error: err } = await supabase.from(table).update({ status: newStatus }).eq('id', data.id)
     error = err
@@ -59,8 +59,6 @@ export async function manageListItem(table: 'departments' | 'locations' | 'emplo
 // --- 3. Períodos ---
 export async function togglePeriodStatus(periodId: string, currentStatus: boolean) {
   const supabase = await createClient()
-  // Se está aberto (true), fecha (false). Se fechado, abre.
-  // Nota: No banco 'is_open' controla se aceita novos cálculos
   const { error } = await supabase.from('periods').update({ is_open: !currentStatus }).eq('id', periodId)
   
   if (error) return { error: error.message }
@@ -73,7 +71,6 @@ export async function togglePeriodStatus(periodId: string, currentStatus: boolea
 export async function resetSystem(target: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATION', userName: string) {
   const supabase = await createClient()
   
-  // Log de segurança antes de apagar
   await supabase.from('movements').insert([{
     employee_id: 'SYSTEM', employee_name: 'SYSTEM', type: 'EXCLUSAO',
     old_value: `RESET TOTAL: ${target}`, user_name: userName, reference_month: new Date().toISOString().slice(0,7)
@@ -82,9 +79,7 @@ export async function resetSystem(target: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATIO
   let error = null
 
   if (target === 'EMPLOYEES') {
-    // Apaga funcionários (Cascade apaga movimentações, faltas, ajustes)
-    // Mantém: Períodos e Configurações
-    const { error: err } = await supabase.from('employees').delete().neq('id', '000000') // Apaga tudo
+    const { error: err } = await supabase.from('employees').delete().neq('id', '000000')
     error = err
   } 
   else if (target === 'ABSENCES') {
@@ -92,14 +87,11 @@ export async function resetSystem(target: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATIO
     error = err
   }
   else if (target === 'CALCULATION') {
-    // Apaga resultados de cálculos que NÃO foram exportados/auditados
-    // Precisamos filtrar períodos abertos/processados apenas
     const { data: openPeriods } = await supabase.from('periods').select('id').neq('status', 'EXPORTADO')
     const ids = openPeriods?.map(p => p.id) || []
     
     if (ids.length > 0) {
         const { error: err } = await supabase.from('period_results').delete().in('period_id', ids)
-        // Reseta status dos períodos para RASCUNHO
         await supabase.from('periods').update({ 
             status: 'RASCUNHO', total_employees: 0, total_value: 0 
         }).in('id', ids)
