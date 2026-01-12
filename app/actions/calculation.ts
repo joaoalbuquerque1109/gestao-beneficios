@@ -5,12 +5,13 @@ import { revalidatePath } from 'next/cache'
 import { calculateBenefit } from '@/services/benefit-calculation'
 import { getCalculationRange, getBusinessDaysBetween } from '@/utils/date-helpers'
 
+// --- FUNÇÃO DE PROCESSAMENTO (MANTIDA IGUAL) ---
 export async function processPeriod(periodInput: string, userEmail: string) {
   const supabase = await createClient()
   let targetId = periodInput
   let periodName = periodInput
 
-  // --- PASSO 1: Resolver Período ---
+  // 1. Resolver Período
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(periodInput)
   if (!isUUID) {
     const { data: existingPeriod } = await supabase.from('periods').select('id, name').eq('name', periodInput).single()
@@ -30,7 +31,7 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     if (p) periodName = p.name
   }
 
-  // --- PASSO 2: Configurações e Dados ---
+  // 2. Configurações
   const { data: config, error: configError } = await supabase.from('global_config').select('*').single()
   if (configError || !config) return { error: 'Erro crítico: Configurações globais não encontradas.' }
 
@@ -39,49 +40,37 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   const BASKET_LIMIT = Number(config.basket_limit) || 1780.00
   const STANDARD_BUSINESS_DAYS = Number(config.business_days) || 22
 
-  // A. Intervalo de Ponto (para buscar Faltas Avulsas)
-  // Ex: 15/Dez a 14/Jan
+  // Intervalos
   const { start: absencesStart, end: absencesEnd } = getCalculationRange(periodName, config.cutoff_day || 15)
-
-  // B. Intervalo Civil (para calcular proporção de Férias do Mês)
-  // Ex: 01/Jan a 31/Jan - Isso corrige o erro de descontar dias de Dezembro!
   const [pYear, pMonth] = periodName.split('-').map(Number)
   const monthStart = new Date(pYear, pMonth - 1, 1)
-  const monthEnd = new Date(pYear, pMonth, 0) // Último dia do mês
+  const monthEnd = new Date(pYear, pMonth, 0)
 
-  // Busca funcionários (mesmo os Inativos que trabalharam no período)
+  // 3. Buscar Dados
   const { data: employees, error: empError } = await supabase
     .from('employees').select('*').not('status', 'eq', 'INATIVO')
   if (empError) return { error: 'Erro ao buscar funcionários: ' + empError.message }
 
-  // Busca Faltas Avulsas (usando a janela de ponto)
   const { data: absences, error: absError } = await supabase
     .from('absences').select('*').gte('date', absencesStart).lte('date', absencesEnd)
   if (absError) return { error: 'Erro ao buscar ausências: ' + absError.message }
 
-  // --- PASSO 3: Cálculo ---
+  // 4. Calcular
   const resultsToInsert = employees.map(employee => {
-    // A. Faltas Manuais (Olha a janela de ponto: 15 a 14)
-    const empAbsences = absences?.filter(a => a.employee_id === employee.employee_id) || []
+    const empAbsences = absences?.filter(a => a.employee_id === employee.id) || []
     const manualUnjustified = empAbsences.filter(a => a.type === 'INJUSTIFICADA').length
     const manualJustified = empAbsences.filter(a => a.type === 'JUSTIFICADA').length
 
-    // B. Cálculo de Férias (Olha o mês civil: 01 a 31)
     let vacationDays = 0
     if (employee.status_start_date && employee.status_end_date) {
         const statusStart = new Date(employee.status_start_date)
         const statusEnd = new Date(employee.status_end_date)
-
-        // Intersecção com o MÊS ATUAL (monthStart a monthEnd)
-        // Isso impede que dias de Dezembro sejam descontados em Janeiro
         const interStart = statusStart > monthStart ? statusStart : monthStart
         const interEnd = statusEnd < monthEnd ? statusEnd : monthEnd
-
         if (interStart <= interEnd) {
             vacationDays = getBusinessDaysBetween(interStart, interEnd)
         }
     }
-
     const totalJustified = manualJustified + vacationDays
 
     const calculation = calculateBenefit({
@@ -97,12 +86,14 @@ export async function processPeriod(periodInput: string, userEmail: string) {
 
     return {
       period_id: targetId,
-      employee_id: employee.employee_id,
+      employee_id: employee.id, // Corrigido para usar employee.id do objeto buscado
       employee_name: employee.name,
+      employee_role: employee.role, // Adicionado conforme esquema
+      department: employee.department_id, // Adicionado conforme esquema
       days_worked: calculation.daysWorked,
       va_value: calculation.vaValue,
       basket_value: calculation.basketValue,
-      total_receivable: calculation.total,
+      total_receivable: calculation.total, // Importante: estamos salvando no total_receivable
       calculation_details: { 
           ...calculation.debug, 
           vacationDaysCalculated: vacationDays,
@@ -111,14 +102,13 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     }
   })
 
-  // --- PASSO 4: Salvar ---
+  // 5. Salvar
   await supabase.from('period_results').delete().eq('period_id', targetId)
   if (resultsToInsert.length > 0) {
     const { error: insertError } = await supabase.from('period_results').insert(resultsToInsert)
     if (insertError) return { error: 'Erro ao salvar resultados: ' + insertError.message }
   }
 
-  // --- PASSO 5: Totais ---
   const totalValue = resultsToInsert.reduce((acc, curr) => acc + curr.total_receivable, 0)
   await supabase.from('periods').update({ 
         status: 'PROCESSADO',
@@ -130,4 +120,37 @@ export async function processPeriod(periodInput: string, userEmail: string) {
 
   revalidatePath('/calculation')
   return { success: true, count: resultsToInsert.length, total: totalValue }
+}
+
+// --- FUNÇÃO CORRIGIDA PARA EXPORTAÇÃO ---
+export async function getPeriodDataForExport(periodName: string) {
+  const supabase = await createClient()
+  
+  // A query abaixo respeita estritamente o esquema fornecido:
+  // period_results -> employee_id -> employees(id) (FK: period_results_employee_id_fkey)
+  // period_results -> period_id -> periods(id) (FK: period_results_period_id_fkey)
+  
+  const { data, error } = await supabase
+    .from('period_results')
+    .select(`
+      employee_id,
+      employee_name,
+      total_receivable,
+      employees!inner (
+        cpf,
+        birth_date,
+        department_id
+      ),
+      periods!inner (
+        name
+      )
+    `)
+    .eq('periods.name', periodName)
+
+  if (error) {
+    console.error('Erro na exportação:', error)
+    return { error: error.message }
+  }
+  
+  return { data }
 }

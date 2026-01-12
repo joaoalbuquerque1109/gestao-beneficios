@@ -3,17 +3,19 @@
 'use client'
 
 import { useState } from 'react'
-import { Play, Calendar, DollarSign, Users } from 'lucide-react'
-import { processPeriod } from '@/app/actions/calculation'
+import { Play, Calendar, DollarSign, Users, CreditCard, Loader2 } from 'lucide-react'
+// Importe a nova função de busca e a biblioteca XLSX
+import { processPeriod, getPeriodDataForExport } from '@/app/actions/calculation'
+import * as XLSX from 'xlsx'
 
 export default function CalculationClient({ periods, user }: any) {
   const [selectedPeriod, setSelectedPeriod] = useState(
     new Date().toISOString().slice(0, 7) // Mês atual Ex: "2026-01"
   )
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false) // Estado separado para o botão de exportar
 
   const handleProcess = async () => {
-    // Busca se já existe dados para avisar o usuário corretamente
     const existing = periods.find((p: any) => p.name === selectedPeriod)
     
     if (existing && existing.status === 'PROCESSADO') {
@@ -30,13 +32,56 @@ export default function CalculationClient({ periods, user }: any) {
         alert(res.error)
     } else {
         alert(`Cálculo concluído com sucesso!\n\nFuncionários Processados: ${res.count}\nValor Total: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(res.total || 0)}`)
-        window.location.reload() // Recarrega para buscar os dados novos do banco
+        window.location.reload()
     }
   }
 
-  // --- CORREÇÃO AQUI ---
-  // Antes: p.id === selectedPeriod (Comparava UUID com Data)
-  // Agora: p.name === selectedPeriod (Compara "2026-01" com "2026-01")
+  // --- NOVA FUNÇÃO: EXPORTAR VALECARD ---
+  const handleExportValecard = async () => {
+    if (!currentPeriodData || currentPeriodData.status !== 'PROCESSADO') {
+        return alert('É necessário processar a competência antes de exportar.')
+    }
+
+    setExporting(true)
+
+    // 1. Busca os dados completos no servidor
+    const { data, error } = await getPeriodDataForExport(selectedPeriod)
+    
+    if (error || !data || data.length === 0) {
+        alert('Erro ao buscar dados ou folha vazia.')
+        setExporting(false)
+        return
+    }
+
+    // 2. Formata para o layout Valecard (Matrícula, Referência, Nome, Dt. Nascimento, CPF, Valor)
+    const formatDate = (dateStr: string) => {
+        if (!dateStr) return '';
+        const [year, month, day] = dateStr.split('-');
+        return `${day}/${month}/${year}`;
+    }
+
+    const dataToExport = data.map((r: any) => {
+        const emp = r.employees || {}
+        return {
+            'Matrícula': r.employee_id,
+            'Referência': emp.department_id || 'GERAL',
+            'Nome': r.employee_name,
+            'Dt. Nascimento': formatDate(emp.birth_date),
+            'CPF': emp.cpf ? emp.cpf.replace(/\D/g, '') : '', // Apenas números
+            'Valor': r.total_receivable
+        }
+    })
+
+    // 3. Gera e baixa o Excel
+    const ws = XLSX.utils.json_to_sheet(dataToExport)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Pedido")
+    const fileName = `Pedido_Valecard_${selectedPeriod}.xlsx`
+    XLSX.writeFile(wb, fileName)
+
+    setExporting(false)
+  }
+
   const currentPeriodData = periods.find((p: any) => p.name === selectedPeriod)
 
   return (
@@ -99,10 +144,19 @@ export default function CalculationClient({ periods, user }: any) {
                     }`}>
                         {currentPeriodData.status}
                     </span>
-                    {currentPeriodData.processed_at && (
-                        <p className="text-xs text-slate-400 mt-1">
-                            Atualizado em: {new Date(currentPeriodData.processed_at).toLocaleDateString('pt-BR')}
-                        </p>
+                    
+                    {/* --- BOTÃO DE EXPORTAÇÃO INSERIDO AQUI --- */}
+                    {currentPeriodData.status === 'PROCESSADO' && (
+                        <div className="mt-3">
+                             <button 
+                                onClick={handleExportValecard}
+                                disabled={exporting}
+                                className="flex items-center gap-2 text-xs font-bold text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
+                            >
+                                {exporting ? <Loader2 size={14} className="animate-spin"/> : <CreditCard size={14} />}
+                                {exporting ? 'Gerando...' : 'Baixar Arquivo Valecard'}
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
