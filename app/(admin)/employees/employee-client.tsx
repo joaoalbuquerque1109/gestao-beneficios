@@ -2,10 +2,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { saveEmployee, deleteEmployee, importEmployeesBatch } from '@/app/actions/employees'
 import { 
-  Plus, Search, Trash2, Pencil, Upload, Download, FileDown, X, UserPlus, Loader2
+  Plus, Search, Trash2, Pencil, Upload, Download, FileDown, X, UserPlus, Loader2,
+  ChevronLeft, ChevronRight 
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -16,12 +17,21 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   
+  // --- PAGINAÇÃO ---
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 20
+
   const [isEditMode, setIsEditMode] = useState(false)
   const [formData, setFormData] = useState({
     id: '', name: '', cpf: '', role: '', salary: 0, 
     department: '', location: '', status: 'ATIVO',
     admissionDate: '', birthDate: ''
   })
+
+  // Resetar para página 1 quando pesquisar
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search])
 
   // --- HELPER DE DATA ---
   const excelDateToISO = (val: any) => {
@@ -79,7 +89,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
           return {
               id: String(row['Matrícula'] || row['Matricula'] || ''),
               name: row['Nome Completo'] || row['Nome'] || '',
-              // CORREÇÃO AQUI: Forçar String no CPF vindo do Excel
               cpf: String(row['CPF'] || ''),
               role: row['Cargo'] || '',
               department: row['Secretaria'] || 'EDUCACAO',
@@ -118,13 +127,23 @@ export default function EmployeeClient({ initialEmployees, departments, location
     }
   }
 
-  // --- RESTO DO CÓDIGO ---
+  // --- LÓGICA DE FILTRO E PAGINAÇÃO ---
   const filtered = employees.filter((e: any) => 
     e.name.toLowerCase().includes(search.toLowerCase()) || 
     e.id.includes(search)
   )
 
+  // Calcula índices
+  const totalItems = filtered.length
+  const totalPages = Math.ceil(totalItems / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  
+  // Pega apenas os itens da página atual para exibir
+  const currentData = filtered.slice(startIndex, endIndex)
+
   const handleExport = () => {
+    // Exporta TODOS os filtrados, não apenas a página atual
     const dataToExport = filtered.map((e: any) => ({
       'Matrícula': e.id,
       'Nome Completo': e.name,
@@ -179,7 +198,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
     e.preventDefault()
     setLoading(true)
     setLoadingMessage('Salvando...')
-    // Ação protegida, mas o formulário também garante string via inputs
     const res = await saveEmployee(formData, user.email || 'Admin', isEditMode)
     if (res.error) alert('Erro: ' + res.error)
     else {
@@ -211,7 +229,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
     <div className="space-y-6">
       {/* LOADING OVERLAY */}
       {loading && (
-        <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-9999 text-white">
+        <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-50 text-white">
             <Loader2 size={48} className="animate-spin mb-4" />
             <p className="text-xl font-bold">{loadingMessage || 'Processando...'}</p>
         </div>
@@ -270,7 +288,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-                {filtered.map((emp: any) => (
+                {currentData.map((emp: any) => (
                 <tr key={emp.id} className="hover:bg-slate-50">
                     <td className="px-6 py-3 font-medium">{emp.id}</td>
                     <td className="px-6 py-3 font-medium text-slate-800">{emp.name}</td>
@@ -301,6 +319,37 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </tbody>
             </table>
         </div>
+
+        {/* --- CONTROLES DE PAGINAÇÃO --- */}
+        {totalItems > 0 && (
+            <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
+                <span className="text-sm text-slate-500">
+                    Mostrando <b>{startIndex + 1}</b> a <b>{Math.min(endIndex, totalItems)}</b> de <b>{totalItems}</b>
+                </span>
+                
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
+                    >
+                        <ChevronLeft size={16}/>
+                    </button>
+                    
+                    <span className="text-sm font-medium px-2">
+                        Página {currentPage} de {totalPages}
+                    </span>
+
+                    <button 
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                        className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent"
+                    >
+                        <ChevronRight size={16}/>
+                    </button>
+                </div>
+            </div>
+        )}
       </div>
 
       {isModalOpen && (
