@@ -5,6 +5,7 @@ export interface ParsedAbsence {
   employeeId: string;
   date: string;
   reason: string;
+  type?: string; // Novo campo opcional
 }
 
 export const parseAbsences = async (file: File): Promise<ParsedAbsence[]> => {
@@ -16,23 +17,18 @@ export const parseAbsences = async (file: File): Promise<ParsedAbsence[]> => {
   const absences: ParsedAbsence[] = [];
 
   jsonData.forEach((row) => {
-    // Tenta ler matrícula de várias colunas possíveis
+    // 1. Matrícula
     const rawId = row['Matrícula'] || row['Matricula'] || row['ID'];
-    
-    // Normaliza ID (remove zeros a esquerda se for apenas números, etc)
-    // Aqui assumimos string direta para simplificar
-    const employeeId = String(rawId).trim(); 
+    const employeeId = String(rawId || '').trim(); 
 
-    // Tenta ler a data (Excel serial number ou String)
+    // 2. Data
     let dateStr = '';
     const rawDate = row['Data da Falta'] || row['Data'] || row['Dia'];
 
     if (typeof rawDate === 'number') {
-      // Converte número serial do Excel para JS Date
       const dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
       dateStr = dateObj.toISOString().split('T')[0];
     } else if (typeof rawDate === 'string') {
-        // Tenta converter DD/MM/YYYY para YYYY-MM-DD
         if (rawDate.includes('/')) {
             const [d, m, y] = rawDate.split('/');
             dateStr = `${y}-${m}-${d}`;
@@ -41,11 +37,16 @@ export const parseAbsences = async (file: File): Promise<ParsedAbsence[]> => {
         }
     }
 
+    // 3. Tipo da Falta (Crucial para o cálculo)
+    // Procura por colunas: Tipo, Classificação, Type
+    const rawType = row['Tipo'] || row['Classificação'] || row['Classificacao'] || row['Type'] || '';
+
     if (employeeId && dateStr) {
       absences.push({
         employeeId,
         date: dateStr,
-        reason: row['Motivo'] || 'Falta Importada'
+        reason: row['Motivo'] || 'Falta Importada',
+        type: rawType // Passa o valor para ser processado no backend
       });
     }
   });
