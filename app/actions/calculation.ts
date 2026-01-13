@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { calculateBenefit } from '@/services/benefit-calculation'
 import { getCalculationRange, getBusinessDaysBetween } from '@/utils/date-helpers'
 
-// --- FUNÇÃO DE PROCESSAMENTO (MANTIDA IGUAL) ---
+// --- FUNÇÃO DE PROCESSAMENTO ---
 export async function processPeriod(periodInput: string, userEmail: string) {
   const supabase = await createClient()
   let targetId = periodInput
@@ -46,7 +46,7 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   const monthStart = new Date(pYear, pMonth - 1, 1)
   const monthEnd = new Date(pYear, pMonth, 0)
 
-  // 3. Buscar Dados
+  // 3. Buscar Dados (Funcionários, Ausências e Ajustes)
   const { data: employees, error: empError } = await supabase
     .from('employees').select('*').not('status', 'eq', 'INATIVO')
   if (empError) return { error: 'Erro ao buscar funcionários: ' + empError.message }
@@ -55,8 +55,19 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     .from('absences').select('*').gte('date', absencesStart).lte('date', absencesEnd)
   if (absError) return { error: 'Erro ao buscar ausências: ' + absError.message }
 
+  // --- NOVO: BUSCAR AJUSTES FINANCEIROS ---
+  // Busca todos os ajustes vinculados a este período (nome do período, ex: "2024-05")
+  const { data: adjustments, error: adjError } = await supabase
+    .from('adjustments')
+    .select('*')
+    .eq('period_id', periodName)
+  
+  if (adjError) return { error: 'Erro ao buscar ajustes: ' + adjError.message }
+  // ----------------------------------------
+
   // 4. Calcular
   const resultsToInsert = employees.map(employee => {
+    // Processamento de Ausências
     const empAbsences = absences?.filter(a => a.employee_id === employee.id) || []
     const manualUnjustified = empAbsences.filter(a => a.type === 'INJUSTIFICADA').length
     const manualJustified = empAbsences.filter(a => a.type === 'JUSTIFICADA').length
@@ -73,6 +84,15 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     }
     const totalJustified = manualJustified + vacationDays
 
+    // --- NOVO: CALCULAR TOTAL DE AJUSTES ---
+    const empAdjustments = adjustments?.filter(a => a.employee_id === employee.id) || []
+    
+    const adjustmentsTotal = empAdjustments.reduce((acc, curr) => {
+        const val = Number(curr.value)
+        return curr.type === 'CREDITO' ? acc + val : acc - val
+    }, 0)
+    // --------------------------------------
+
     const calculation = calculateBenefit({
       employee,
       unjustifiedAbsences: manualUnjustified,
@@ -81,23 +101,25 @@ export async function processPeriod(periodInput: string, userEmail: string) {
       dailyValueVA: DAILY_VALUE_VA,
       basketValue: BASKET_VALUE,
       basketLimit: BASKET_LIMIT,
-      periodId: periodName
+      periodId: periodName,
+      adjustmentsTotal: adjustmentsTotal // <--- Passando o valor para o cálculo
     })
 
     return {
       period_id: targetId,
-      employee_id: employee.id, // Corrigido para usar employee.id do objeto buscado
+      employee_id: employee.id,
       employee_name: employee.name,
-      employee_role: employee.role, // Adicionado conforme esquema
-      department: employee.department_id, // Adicionado conforme esquema
+      employee_role: employee.role,
+      department: employee.department_id,
       days_worked: calculation.daysWorked,
       va_value: calculation.vaValue,
       basket_value: calculation.basketValue,
-      total_receivable: calculation.total, // Importante: estamos salvando no total_receivable
+      total_receivable: calculation.total, // Total agora já inclui os ajustes
       calculation_details: { 
           ...calculation.debug, 
           vacationDaysCalculated: vacationDays,
-          vacationRangeUsed: { start: monthStart, end: monthEnd } 
+          vacationRangeUsed: { start: monthStart, end: monthEnd },
+          adjustmentsTotal // Salva o detalhe do ajuste para conferência
       }
     }
   })
@@ -122,13 +144,9 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   return { success: true, count: resultsToInsert.length, total: totalValue }
 }
 
-// --- FUNÇÃO CORRIGIDA PARA EXPORTAÇÃO ---
+// --- FUNÇÃO PARA EXPORTAÇÃO (MANTIDA IGUAL, MAS INCLUÍDA POR INTEGRIDADE) ---
 export async function getPeriodDataForExport(periodName: string) {
   const supabase = await createClient()
-  
-  // A query abaixo respeita estritamente o esquema fornecido:
-  // period_results -> employee_id -> employees(id) (FK: period_results_employee_id_fkey)
-  // period_results -> period_id -> periods(id) (FK: period_results_period_id_fkey)
   
   const { data, error } = await supabase
     .from('period_results')

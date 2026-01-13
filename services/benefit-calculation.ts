@@ -10,6 +10,7 @@ interface CalcParams {
   basketValue: number;
   basketLimit: number;
   periodId: string;
+  adjustmentsTotal: number; // <--- NOVO CAMPO: Soma dos créditos/débitos manuais
 }
 
 export const calculateBenefit = (params: CalcParams) => {
@@ -21,7 +22,8 @@ export const calculateBenefit = (params: CalcParams) => {
     dailyValueVA, 
     basketValue, 
     basketLimit, 
-    periodId 
+    periodId,
+    adjustmentsTotal // <--- Recebendo o valor
   } = params;
   
   // 1. Regra de Admissão Proporcional
@@ -70,11 +72,20 @@ export const calculateBenefit = (params: CalcParams) => {
     basketFinal = Math.max(0, baseValue * (1 - penalty));
   }
 
+  // 4. Cálculo Final
+  // Soma o VA, Cesta e o Total de Ajustes (que pode ser negativo no caso de débitos)
+  const totalFinal = vaFinal + basketFinal + adjustmentsTotal;
+
   return {
     daysWorked: effectiveDays,
     vaValue: vaFinal,
     basketValue: basketFinal,
-    total: vaFinal + basketFinal,
-    debug: { totalAbsences, unjustifiedAbsences, penaltyApplied: unjustifiedAbsences >= 1 }
+    total: totalFinal, // Valor atualizado com ajustes
+    debug: { 
+        totalAbsences, 
+        unjustifiedAbsences, 
+        penaltyApplied: unjustifiedAbsences >= 1,
+        adjustmentsTotal 
+    }
   };
 };
