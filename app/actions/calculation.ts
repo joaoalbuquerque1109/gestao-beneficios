@@ -48,7 +48,11 @@ export async function processPeriod(periodInput: string, userEmail: string) {
 
   // 3. Buscar Dados (Funcionários, Ausências e Ajustes)
   const { data: employees, error: empError } = await supabase
-    .from('employees').select('*').not('status', 'eq', 'INATIVO')
+    .from('employees')
+    .select('*')
+    .in('status', ['ATIVO', 'AFASTADO DOENCA', 'AFASTADO INSS', 'FERIAS', 'MATERNIDADE', 'ATESTADO MEDICO']) 
+    // Adicione aqui todos os nomes de status que você usa para quem ainda é da empresa
+
   if (empError) return { error: 'Erro ao buscar funcionários: ' + empError.message }
 
   const { data: absences, error: absError } = await supabase
