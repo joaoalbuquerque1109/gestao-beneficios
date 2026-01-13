@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { saveEmployee, deleteEmployee, importEmployeesBatch } from '@/app/actions/employees'
 import { 
   Plus, Search, Trash2, Pencil, Upload, Download, FileDown, X, UserPlus, Loader2,
-  ChevronLeft, ChevronRight, CalendarClock, AlertTriangle
+  ChevronLeft, ChevronRight, CalendarClock, AlertTriangle, ShoppingBasket // <--- Importei o ícone da Cesta
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { differenceInBusinessDays, parseISO, isValid } from 'date-fns'
@@ -18,13 +18,15 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   
+  // --- NOVO ESTADO PARA O FILTRO DE CESTA ---
+  const [showBasketOnly, setShowBasketOnly] = useState(false)
+
   // --- PAGINAÇÃO ---
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
 
   const [isEditMode, setIsEditMode] = useState(false)
   
-  // Estado
   const [formData, setFormData] = useState({
     id: '', name: '', cpf: '', role: '', salary: 0, 
     department: '', location: '', status: 'ATIVO',
@@ -32,7 +34,15 @@ export default function EmployeeClient({ initialEmployees, departments, location
     statusStartDate: '', statusEndDate: ''
   })
 
-  // Status que exibem os campos de data na tela
+  // --- LÓGICA DO TETO DA CESTA ---
+  // Pega o valor da config global ou usa padrão 1780.00
+  const BASKET_LIMIT = Number(globalConfig?.basket_limit) || 1780.00
+  
+  // Conta quantos funcionários ATIVOS ganham até o teto
+  const eligibleForBasketCount = employees.filter((e: any) => 
+    e.status === 'ATIVO' && Number(e.salary) <= BASKET_LIMIT
+  ).length
+
   const STATUS_TEMPORARIOS = [
     "AFASTADO INSS", 
     "AFASTADO DOENCA", 
@@ -42,33 +52,25 @@ export default function EmployeeClient({ initialEmployees, departments, location
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [search])
+  }, [search, showBasketOnly]) // Reseta a página ao mudar o filtro
 
-  // --- LÓGICA DE CÁLCULO DE IMPACTO ---
+  // ... (calculateImpact e excelDateToISO mantidos iguais) ...
   const calculateImpact = () => {
     if (!STATUS_TEMPORARIOS.includes(formData.status) || !formData.statusStartDate || !formData.statusEndDate) {
       return null
     }
-
     const start = parseISO(formData.statusStartDate)
     const end = parseISO(formData.statusEndDate)
-    
     if (!isValid(start) || !isValid(end)) return null;
     if (end < start) return null;
-
     const businessDaysOff = differenceInBusinessDays(end, start) + 1; 
     const dailyVa = Number(globalConfig?.daily_value_va || 0);
     const vaLoss = businessDaysOff * dailyVa;
-
-    return {
-      days: businessDaysOff,
-      vaLoss: vaLoss
-    }
+    return { days: businessDaysOff, vaLoss: vaLoss }
   }
 
   const impact = calculateImpact()
 
-  // --- HELPER DE DATA ---
   const excelDateToISO = (val: any) => {
     if (!val || val === '' || val === '-') return null
     try {
@@ -89,14 +91,13 @@ export default function EmployeeClient({ initialEmployees, departments, location
     return null
   }
 
-  // --- IMPORTAÇÃO ---
+  // ... (handleImport mantido igual) ...
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return
     const file = e.target.files[0]
     e.target.value = '' 
     setLoading(true)
     setLoadingMessage('Lendo arquivo...')
-    
     try {
       const data = await file.arrayBuffer()
       const workbook = XLSX.read(data)
@@ -113,9 +114,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
             jsonData = XLSX.utils.sheet_to_json(worksheet)
         }
       }
-
       setLoadingMessage(`Processando ${jsonData.length} linhas...`)
-
       const parsedEmployees = jsonData.map((row: any) => {
           return {
               id: String(row['Matrícula'] || row['Matricula'] || ''),
@@ -130,18 +129,14 @@ export default function EmployeeClient({ initialEmployees, departments, location
               birthDate: excelDateToISO(row['Data de Nascimento'] || row['Nascimento'])
           }
       })
-
       const validEmployees = parsedEmployees.filter((e: any) => e.id && e.id !== 'undefined' && e.name)
-
       if (validEmployees.length === 0) {
         alert(`Erro: Nenhuma coluna "Matrícula" encontrada.`)
         setLoading(false)
         return
       }
-
       setLoadingMessage(`Salvando ${validEmployees.length} funcionários...`)
       const res = await importEmployeesBatch(validEmployees, user.email || 'Admin')
-      
       if (res.error) alert('Erro ao salvar no banco:\n' + res.error)
       else {
         alert(`Sucesso! ${res.count} funcionários importados.`)
@@ -155,12 +150,20 @@ export default function EmployeeClient({ initialEmployees, departments, location
     }
   }
 
-  // --- FILTRO E PAGINAÇÃO ---
-  const filtered = employees.filter((e: any) => 
-    e.name.toLowerCase().includes(search.toLowerCase()) || 
-    e.id.includes(search)
-  )
+  // --- LÓGICA DE FILTRAGEM ATUALIZADA ---
+  const filtered = employees.filter((e: any) => {
+    // 1. Filtro de Texto
+    const matchesSearch = e.name.toLowerCase().includes(search.toLowerCase()) || e.id.includes(search)
+    
+    // 2. Filtro de Cesta (Salário <= Limite E Status Ativo)
+    const matchesBasket = showBasketOnly 
+        ? (Number(e.salary) <= BASKET_LIMIT && e.status === 'ATIVO') 
+        : true
 
+    return matchesSearch && matchesBasket
+  })
+
+  // ... (Paginação e Exportação mantidos iguais) ...
   const totalItems = filtered.length
   const totalPages = Math.ceil(totalItems / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
@@ -191,6 +194,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
     XLSX.writeFile(wb, "Modelo_Importacao.xlsx")
   }
 
+  // ... (Modais e Submits mantidos iguais) ...
   const handleOpenNew = () => {
     setFormData({
         id: '', name: '', cpf: '', role: '', salary: 0, 
@@ -218,12 +222,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
     e.preventDefault()
     setLoading(true)
     setLoadingMessage('Salvando...')
-    
-    // --- CORREÇÃO IMPORTANTE ---
-    // Removemos a lógica que limpava as datas se o status não fosse temporário.
-    // Agora enviamos as datas mesmo se o status for ATIVO, preservando o histórico para o cálculo.
     const dataToSave = { ...formData }
-
     const res = await saveEmployee(dataToSave, user.email || 'Admin', isEditMode)
     if (res.error) alert('Erro: ' + res.error)
     else {
@@ -260,6 +259,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       )}
 
+      {/* --- HEADER --- */}
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <h2 className="text-2xl font-bold text-slate-800">Base de Funcionários</h2>
         <div className="flex flex-wrap gap-2">
@@ -279,8 +279,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex gap-4">
-        <div className="relative flex-1 max-w-md">
+      {/* --- BARRA DE PESQUISA E FILTRO DE CESTA --- */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 justify-between items-center">
+        {/* Input de Busca */}
+        <div className="relative flex-1 w-full max-w-md">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={20} />
           <input
             type="text"
@@ -290,11 +292,30 @@ export default function EmployeeClient({ initialEmployees, departments, location
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex items-center text-sm text-slate-500">
-            {filtered.length} registros encontrados
-        </div>
+
+        {/* BOTÃO INDICADOR E FILTRO DE CESTA */}
+        <button 
+            onClick={() => setShowBasketOnly(!showBasketOnly)}
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition ${
+                showBasketOnly 
+                ? 'bg-orange-50 border-orange-300 text-orange-800' 
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+        >
+            <div className={`p-1.5 rounded-full ${showBasketOnly ? 'bg-orange-200 text-orange-700' : 'bg-slate-100 text-slate-500'}`}>
+                <ShoppingBasket size={18} />
+            </div>
+            <div className="text-left leading-tight">
+                <span className="text-xs font-bold uppercase block">Recebem Cesta</span>
+                <span className="text-sm font-medium">
+                    {eligibleForBasketCount} Funcionários
+                </span>
+            </div>
+            {showBasketOnly && <X size={16} className="ml-2 text-orange-400" />}
+        </button>
       </div>
 
+      {/* --- TABELA --- */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
@@ -312,7 +333,15 @@ export default function EmployeeClient({ initialEmployees, departments, location
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-                {currentData.map((emp: any) => (
+                {currentData.length === 0 ? (
+                   <tr>
+                     <td colSpan={9} className="p-8 text-center text-slate-400">
+                        {showBasketOnly 
+                            ? "Nenhum funcionário encontrado dentro do limite da Cesta Básica com este filtro."
+                            : "Nenhum funcionário encontrado."}
+                     </td>
+                   </tr>
+                ) : currentData.map((emp: any) => (
                 <tr key={emp.id} className="hover:bg-slate-50">
                     <td className="px-6 py-3 font-medium">{emp.id}</td>
                     <td className="px-6 py-3 font-medium text-slate-800">{emp.name}</td>
@@ -320,7 +349,17 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <td className="px-6 py-3"><span className="bg-slate-100 px-2 py-1 rounded text-xs border border-slate-200">{emp.department_id}</span></td>
                     <td className="px-6 py-3 text-slate-500">{emp.location_id}</td>
                     <td className="px-6 py-3">{emp.role}</td>
-                    <td className="px-6 py-3 font-mono">{formatCurrency(emp.salary)}</td>
+                    <td className="px-6 py-3 font-mono">
+                        <div className="flex items-center gap-2">
+                            {formatCurrency(emp.salary)}
+                            {/* Ícone pequeno se recebe cesta */}
+                            {emp.status === 'ATIVO' && emp.salary <= BASKET_LIMIT && (
+                                <span title="Recebe Cesta" className="inline-block">
+                                    <ShoppingBasket size={14} className="text-orange-500" />
+                                </span>
+                            )}
+                        </div>
+                    </td>
                     <td className="px-6 py-3">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
                         emp.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 
@@ -364,8 +403,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
       </div>
 
       {isModalOpen && (
+        // ... (Mantido o código do Modal igual ao original)
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+            {/* Cabeçalho do Modal */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     <UserPlus size={20} /> {isEditMode ? 'Editar Funcionário' : 'Novo Cadastro'}
@@ -374,6 +415,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-2 gap-4">
+                {/* Campos do Formulário (Copiados do seu código original para integridade) */}
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Matrícula</label>
                     <input required disabled={isEditMode} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100" 
