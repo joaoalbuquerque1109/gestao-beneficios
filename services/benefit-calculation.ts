@@ -3,14 +3,15 @@ import { getBusinessDaysBetween } from '@/utils/date-helpers';
 
 interface CalcParams {
   employee: any;
-  unjustifiedAbsences: number; // Faltas Injustificadas (Afetam Cesta e VA)
-  justifiedAbsences: number;   // Férias, Atestados, INSS (Afetam apenas VA)
-  workingDays: number;
+  unjustifiedAbsences: number; 
+  justifiedAbsences: number;   
+  vacationDays: number;        
+  workingDays: number;         
   dailyValueVA: number;
   basketValue: number;
   basketLimit: number;
   periodId: string;
-  adjustmentsTotal: number; // <--- NOVO CAMPO: Soma dos créditos/débitos manuais
+  adjustmentsTotal: number;
 }
 
 export const calculateBenefit = (params: CalcParams) => {
@@ -18,52 +19,69 @@ export const calculateBenefit = (params: CalcParams) => {
     employee, 
     unjustifiedAbsences, 
     justifiedAbsences, 
+    vacationDays,
     workingDays, 
     dailyValueVA, 
     basketValue, 
     basketLimit, 
     periodId,
-    adjustmentsTotal // <--- Recebendo o valor
+    adjustmentsTotal
   } = params;
   
-  // 1. Regra de Admissão Proporcional
+  // 1. Regra de Admissão Proporcional (Baseada em dias úteis para o VA)
   let effectiveDays = workingDays;
-  let isNewAdmission = false;
 
   if (employee.admission_date) {
     const [pYear, pMonth] = periodId.split('-').map(Number);
     const admDate = new Date(employee.admission_date);
-    // Se admitido no mesmo mês/ano da competência
+    
     if (admDate.getFullYear() === pYear && (admDate.getMonth() + 1) === pMonth) {
-      isNewAdmission = true;
       const endOfMonth = new Date(pYear, pMonth, 0);
       const days = getBusinessDaysBetween(admDate, endOfMonth);
       effectiveDays = Math.min(days, workingDays);
     }
   }
 
-  // 2. Cálculo VA (Dias Úteis - Faltas Totais)
-  // O VA deve ser descontado por QUALQUER dia não trabalhado (Injustificado ou Justificado/Férias)
-  const totalAbsences = unjustifiedAbsences + justifiedAbsences;
-  
+  // 2. Cálculo VA (Mantém lógica de Dias Úteis - Tolerância 0)
+  const totalAbsencesForVA = unjustifiedAbsences + vacationDays + justifiedAbsences;
   const vaPotential = effectiveDays * dailyValueVA;
-  const vaDiscount = totalAbsences * dailyValueVA;
+  const vaDiscount = totalAbsencesForVA * dailyValueVA;
   const vaFinal = Math.max(0, vaPotential - vaDiscount);
 
-  // 3. Cálculo Cesta (Regra do Teto e Escalonamento de Faltas)
+  // 3. Cálculo Cesta Básica (Base Comercial 30 Dias)
   let basketFinal = 0;
-  
+  let basketDaysToPay = 0;
+  let discountableJustified = 0;
+
   if (Number(employee.salary) <= basketLimit) {
-    let baseValue = basketValue;
     
-    // Proporcional se for admissão
-    if (isNewAdmission && workingDays > 0) {
-        baseValue = (basketValue / workingDays) * effectiveDays;
+    // --- CONVERSÃO PARA BASE 30 ---
+    const COMMERCIAL_MONTH = 30;
+    
+    // Se o funcionário trabalhou o mês todo (dias úteis), ele tem direito a 30 dias comerciais.
+    // Se foi admissão parcial, fazemos a regra de três.
+    let employeeBaseDays = COMMERCIAL_MONTH;
+    if (effectiveDays < workingDays && workingDays > 0) {
+        employeeBaseDays = (effectiveDays / workingDays) * COMMERCIAL_MONTH;
     }
 
-    // Regra de Penalidade por Faltas
-    // Apenas faltas INJUSTIFICADAS aplicam penalidade na cesta
-    // 1 falta = 25% desc, 2 faltas = 50% desc, 3+ faltas = 100% desc
+    // Regra da Tolerância de 5 dias (Cliff Effect)
+    if (justifiedAbsences > 5) {
+        discountableJustified = justifiedAbsences;
+    }
+
+    // Total de dias a descontar (na base 30)
+    // Assumimos que cada dia de atestado/férias representa 1 dia comercial
+    const daysLost = vacationDays + discountableJustified;
+    
+    // Dias efetivos a receber (Ex: 30 - 6 = 24)
+    basketDaysToPay = Math.max(0, employeeBaseDays - daysLost);
+    
+    // Cálculo do Valor: (Valor Cheio / 30) * Dias a Pagar
+    // Ex: (142.05 / 30) * 24 = 113.64
+    const baseValue = (basketValue / COMMERCIAL_MONTH) * basketDaysToPay;
+
+    // Penalidade por Faltas Injustificadas
     let penalty = 0;
     if (unjustifiedAbsences === 1) penalty = 0.25;
     else if (unjustifiedAbsences === 2) penalty = 0.50;
@@ -72,20 +90,21 @@ export const calculateBenefit = (params: CalcParams) => {
     basketFinal = Math.max(0, baseValue * (1 - penalty));
   }
 
-  // 4. Cálculo Final
-  // Soma o VA, Cesta e o Total de Ajustes (que pode ser negativo no caso de débitos)
   const totalFinal = vaFinal + basketFinal + adjustmentsTotal;
 
   return {
     daysWorked: effectiveDays,
     vaValue: vaFinal,
     basketValue: basketFinal,
-    total: totalFinal, // Valor atualizado com ajustes
+    total: totalFinal, 
     debug: { 
-        totalAbsences, 
+        totalAbsencesForVA, 
         unjustifiedAbsences, 
-        penaltyApplied: unjustifiedAbsences >= 1,
-        adjustmentsTotal 
+        justifiedAbsences, 
+        discountableJustified, 
+        vacationDays,
+        adjustmentsTotal,
+        basketDaysToPay // Campo atualizado para debug (base 30)
     }
   };
 };
