@@ -4,23 +4,24 @@
 
 import { useState, useEffect } from 'react'
 import { 
-  Play, Calendar, DollarSign, Users, CreditCard, Loader2, Search, 
+  Play, Calendar, DollarSign, Users, Loader2, Search, 
   ShoppingBasket, X, ChevronLeft, ChevronRight 
 } from 'lucide-react'
 import { processPeriod, getPeriodDataForExport, getCalculationDetails } from '@/app/actions/calculation' 
+import { CalculationHeader } from './calculation-header' // <--- IMPORTANTE: Importar o componente novo
 import * as XLSX from 'xlsx'
 
-export default function CalculationClient({ periods, user }: any) {
+export default function CalculationClient({ periods, user, userRole }: any) { // <--- Recebendo userRole
   const [selectedPeriod, setSelectedPeriod] = useState(
     new Date().toISOString().slice(0, 7)
   )
   const [loading, setLoading] = useState(false)
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState(false) // Mantido para controlar loading do Excel
   
   // --- ESTADOS DA TABELA ---
   const [details, setDetails] = useState<any[]>([])
   const [periodWindow, setPeriodWindow] = useState({ start: '', end: '' })
-  const [basketLimit, setBasketLimit] = useState(1780) // Valor padrão, atualizado pelo back
+  const [basketLimit, setBasketLimit] = useState(1780)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
 
@@ -32,7 +33,8 @@ export default function CalculationClient({ periods, user }: any) {
   useEffect(() => {
     const fetchDetails = async () => {
         const current = periods.find((p: any) => p.name === selectedPeriod)
-        if (current && current.status === 'PROCESSADO') {
+        // Busca detalhes se estiver PROCESSADO, APROVADO ou FECHADO
+        if (current && ['PROCESSADO', 'APPROVED', 'CLOSED'].includes(current.status)) {
             setLoadingDetails(true)
             const res = await getCalculationDetails(selectedPeriod)
             if (res.results) {
@@ -49,14 +51,12 @@ export default function CalculationClient({ periods, user }: any) {
     fetchDetails()
   }, [selectedPeriod, periods])
 
-  // --- CORREÇÃO: REMOVIDO O USEEFFECT QUE CAUSAVA O ERRO ---
-  // A lógica de resetar a página agora está diretamente nos inputs (onChange/onClick)
-
   const handleProcess = async () => {
     const existing = periods.find((p: any) => p.name === selectedPeriod)
     
-    if (existing && existing.status === 'PROCESSADO') {
-        if (!confirm(`O período ${selectedPeriod} já foi processado anteriormente. Deseja recalcular?`)) return
+    // Alerta se já estiver processado/aprovado
+    if (existing && existing.status !== 'OPEN' && existing.status !== null) {
+        if (!confirm(`O período ${selectedPeriod} já possui status ${existing.status}. Deseja recalcular? Isso pode reabrir a competência.`)) return
     } else {
         if (!confirm(`Deseja iniciar o cálculo para a competência ${selectedPeriod}?`)) return
     }
@@ -73,10 +73,10 @@ export default function CalculationClient({ periods, user }: any) {
     setLoading(false)
   }
 
+  // Lógica de exportação (passada para o Header)
   const handleExportValecard = async () => {
-    if (!currentPeriodData || currentPeriodData.status !== 'PROCESSADO') {
-        return alert('É necessário processar a competência antes de exportar.')
-    }
+    if (!currentPeriodData) return
+
     setExporting(true)
     const { data, error } = await getPeriodDataForExport(selectedPeriod)
     
@@ -114,17 +114,14 @@ export default function CalculationClient({ periods, user }: any) {
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val)
   
-  // Função da Regra (Atualizada e segura)
   const getBasketRule = (details: any, salary: number, basketValue: number) => {
       const unjust = details?.unjustifiedAbsences || 0
       
-      // Se zerado
       if (basketValue === 0) {
           if (unjust >= 3) return <span className="text-xs font-bold text-red-600">Cortado (3+ Faltas)</span>
           return <span className="text-xs text-slate-400">Salário &gt; Teto</span>
       }
       
-      // Se recebe algo
       if (unjust === 0) return <span className="text-xs font-bold text-green-600">Integral</span>
       if (unjust === 1) return <span className="text-xs font-bold text-orange-600">Desc. 25%</span>
       if (unjust === 2) return <span className="text-xs font-bold text-orange-700">Desc. 50%</span>
@@ -136,12 +133,9 @@ export default function CalculationClient({ periods, user }: any) {
   
   // --- LÓGICA DE FILTRAGEM ---
   const filteredDetails = details.filter((d: any) => {
-    // 1. Filtro Texto
     const matchesSearch = d.employee_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           d.employee_id.includes(searchTerm)
     
-    // 2. Filtro Cesta (Elegíveis: Salário <= Teto)
-    // Mostra quem recebe ou quem foi cortado por faltas (mas tinha direito pelo salário)
     const matchesBasket = showBasketOnly 
         ? (d.employees?.salary <= basketLimit) 
         : true
@@ -155,23 +149,21 @@ export default function CalculationClient({ periods, user }: any) {
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = startIndex + itemsPerPage
   const currentData = filteredDetails.slice(startIndex, endIndex)
-
-  // Contagem para o botão de filtro
   const basketEligibleCount = details.filter((d:any) => d.employees?.salary <= basketLimit).length
 
   return (
     <div className="space-y-6">
-      {/* HEADER DE CONTROLE */}
+      {/* 1. SELETOR DE PERÍODO (Topo) */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <div>
-            <h2 className="text-2xl font-bold text-slate-800">Apuração Mensal</h2>
-            <p className="text-slate-500">Selecione a competência para processar</p>
+            <h2 className="text-lg font-bold text-slate-700 uppercase tracking-wide">Painel de Controle</h2>
+            <p className="text-slate-500 text-sm">Selecione o mês de referência</p>
         </div>
         
         <div className="flex items-center gap-3">
             <input 
                 type="month"
-                className="border p-2 rounded-lg font-bold text-slate-700"
+                className="border p-2 rounded-lg font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                 value={selectedPeriod}
                 onChange={(e) => setSelectedPeriod(e.target.value)}
             />
@@ -179,20 +171,31 @@ export default function CalculationClient({ periods, user }: any) {
             <button 
                 onClick={handleProcess}
                 disabled={loading}
-                className={`flex items-center gap-2 px-6 py-2 rounded-lg transition text-white ${
-                    loading ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                className={`flex items-center gap-2 px-6 py-2 rounded-lg transition text-white shadow-sm ${
+                    loading ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700'
                 }`}
             >
                 <Play size={18} />
-                {loading ? 'Processando...' : 'Calcular Competência'}
+                {loading ? 'Processando...' : 'Calcular / Recalcular'}
             </button>
         </div>
       </div>
 
       {currentPeriodData ? (
         <>
-            {/* CARDS DE RESUMO */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 2. HEADER DE APROVAÇÃO */}
+                <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                    <CalculationHeader 
+                        periodId={currentPeriodData.id}
+                        periodStatus={currentPeriodData.status || 'OPEN'}
+                        userRole={userRole}
+                        onExport={handleExportValecard}
+                        isExporting={exporting}
+                    />
+                </div>
+
+            {/* 3. CARDS DE RESUMO (Simplificado: apenas 2 cards agora) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
                     <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Users size={24}/></div>
                     <div>
@@ -210,55 +213,26 @@ export default function CalculationClient({ periods, user }: any) {
                         </p>
                     </div>
                 </div>
-                
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                    <div className="p-3 bg-purple-50 text-purple-600 rounded-lg"><Calendar size={24}/></div>
-                    <div>
-                        <p className="text-sm text-slate-500">Status do Período</p>
-                        <div className="flex items-center gap-2">
-                            <span className={`inline-block px-3 py-1 text-xs font-bold rounded-full mt-1 ${
-                                currentPeriodData.status === 'PROCESSADO' 
-                                    ? 'bg-green-100 text-green-700' 
-                                    : 'bg-yellow-100 text-yellow-700'
-                            }`}>
-                                {currentPeriodData.status}
-                            </span>
-                            {currentPeriodData.status === 'PROCESSADO' && (
-                            <div className="mt-2">
-                                <button 
-                                    onClick={handleExportValecard}
-                                    disabled={exporting}
-                                    className="flex items-center gap-2 text-xs font-bold text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
-                                >
-                                    {exporting ? <Loader2 size={14} className="animate-spin"/> : <CreditCard size={14} />}
-                                    {exporting ? 'Gerando...' : 'Baixar Arquivo Valecard'}
-                                </button>
-                            </div>
-                        )}
-                        </div>
-                    </div>
-                </div>
+                {/* Removemos o 3º card de Status pois o Header acima já faz isso melhor */}
             </div>
 
-            {/* TABELA DETALHADA */}
-            {currentPeriodData.status === 'PROCESSADO' && (
+            {/* 4. TABELA DETALHADA (Só aparece se tiver dados processados) */}
+            {['PROCESSADO', 'APPROVED', 'CLOSED'].includes(currentPeriodData.status) && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-4">
+                    <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-4 mt-4">
                         <div>
                              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                                 <Calendar className="text-blue-600" size={20}/>
-                                Janela de Cálculo: <span className="text-blue-600">{periodWindow.start}</span> até <span className="text-blue-600">{periodWindow.end}</span>
+                                Janela de Apuração: <span className="text-blue-600 font-mono">{periodWindow.start}</span> até <span className="text-blue-600 font-mono">{periodWindow.end}</span>
                              </h3>
-                             <p className="text-sm text-slate-500">Detalhamento individual dos benefícios calculados.</p>
                         </div>
 
-                        {/* BARRA DE FERRAMENTAS DA TABELA */}
+                        {/* FILTROS DA TABELA */}
                         <div className="flex flex-col md:flex-row gap-3 items-center">
-                             {/* Botão de Filtro Cesta (CORRIGIDO) */}
                              <button 
                                 onClick={() => {
                                     setShowBasketOnly(!showBasketOnly)
-                                    setCurrentPage(1) // <--- Reseta aqui no clique
+                                    setCurrentPage(1)
                                 }}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
                                     showBasketOnly 
@@ -273,7 +247,6 @@ export default function CalculationClient({ periods, user }: any) {
 
                              <div className="relative w-full md:w-auto">
                                 <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                                {/* Input de Busca (CORRIGIDO) */}
                                 <input 
                                     type="text" 
                                     placeholder="Buscar funcionário..." 
@@ -281,7 +254,7 @@ export default function CalculationClient({ periods, user }: any) {
                                     value={searchTerm}
                                     onChange={e => {
                                         setSearchTerm(e.target.value)
-                                        setCurrentPage(1) // <--- Reseta aqui ao digitar
+                                        setCurrentPage(1)
                                     }}
                                 />
                              </div>
@@ -397,7 +370,7 @@ export default function CalculationClient({ periods, user }: any) {
             <Calendar className="mx-auto h-12 w-12 text-slate-300 mb-3" />
             <h3 className="text-lg font-medium text-slate-900">Nenhum dado encontrado</h3>
             <p className="text-slate-500">Não há cálculo processado para a competência <span className="font-mono font-bold">{selectedPeriod}</span>.</p>
-            <p className="text-sm text-slate-400 mt-1">Clique em "Calcular Competência" para gerar a folha.</p>
+            <p className="text-sm text-slate-400 mt-1">Clique em "Calcular / Recalcular" acima para gerar a folha.</p>
         </div>
       )}
     </div>

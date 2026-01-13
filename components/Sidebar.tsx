@@ -91,7 +91,7 @@ export function Sidebar() {
       label: 'Apuração', 
       path: '/calculation', 
       icon: Calculator, 
-      allowed: ['RH', 'ADMIN'] // Crítico: USER não vê
+      allowed: ['USER', 'RH', 'ADMIN'] // Crítico: USER não vê
     },
     { 
       label: 'Aprovação', 

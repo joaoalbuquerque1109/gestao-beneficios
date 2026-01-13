@@ -75,7 +75,7 @@ export async function middleware(request: NextRequest) {
 
   // B. Rotas de RH e ADMIN (Operacionais)
   // Inclui: Apuração, Aprovação, Movimentações
-  const rhRoutes = ['/calculation', '/approval', '/movements']
+  const rhRoutes = ['/approval', '/movements']
   const isTryingRhRoute = rhRoutes.some(route => path.startsWith(route))
 
   if (isTryingRhRoute) {
