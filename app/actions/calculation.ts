@@ -172,3 +172,53 @@ export async function getPeriodDataForExport(periodName: string) {
   
   return { data }
 }
+export async function getCalculationDetails(periodName: string) {
+  const supabase = await createClient()
+
+  // 1. Busca Configuração para saber o dia de corte (ex: dia 15)
+  const { data: config } = await supabase.from('global_config').select('cutoff_day').single()
+  const cutoffDay = config?.cutoff_day || 15
+
+  // 2. Calcula a Janela (Regra: Dia X do mês anterior até Dia X do mês da competência)
+  // Ex: Competência 2026-01 com corte dia 15 -> De 15/12/2025 até 15/01/2026
+  const [year, month] = periodName.split('-').map(Number)
+  
+  // Mês da competência (JS usa mês 0-11, então month-1 é o mês atual)
+  const endDate = new Date(year, month - 1, cutoffDay)
+  // Mês anterior (month-2)
+  const startDate = new Date(year, month - 2, cutoffDay)
+
+  // 3. Busca os resultados processados
+  // CORREÇÃO: Adicionado 'periods!inner(name)' para permitir o filtro .eq('periods.name', ...)
+  const { data: results, error } = await supabase
+    .from('period_results')
+    .select(`
+      id,
+      employee_id,
+      employee_name,
+      employee_role,
+      department,
+      days_worked,
+      va_value,
+      basket_value,
+      total_receivable,
+      calculation_details,
+      employees!inner ( salary ),
+      periods!inner ( name ) 
+    `)
+    .eq('periods.name', periodName)
+    .order('employee_name')
+
+  if (error) {
+    console.error('Erro ao buscar detalhes:', error)
+    return { error: 'Erro ao buscar dados.' }
+  }
+
+  return { 
+    results, 
+    window: { 
+      start: startDate.toLocaleDateString('pt-BR'), 
+      end: endDate.toLocaleDateString('pt-BR') 
+    } 
+  }
+}

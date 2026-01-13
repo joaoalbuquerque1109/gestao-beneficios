@@ -2,18 +2,43 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
-import { useState } from 'react'
-import { Play, Calendar, DollarSign, Users, CreditCard, Loader2 } from 'lucide-react'
-// Importe a nova função de busca e a biblioteca XLSX
-import { processPeriod, getPeriodDataForExport } from '@/app/actions/calculation'
+import { useState, useEffect } from 'react'
+import { Play, Calendar, DollarSign, Users, CreditCard, Loader2, Search } from 'lucide-react'
+import { processPeriod, getPeriodDataForExport, getCalculationDetails } from '@/app/actions/calculation' // Importe a nova função
 import * as XLSX from 'xlsx'
 
 export default function CalculationClient({ periods, user }: any) {
   const [selectedPeriod, setSelectedPeriod] = useState(
-    new Date().toISOString().slice(0, 7) // Mês atual Ex: "2026-01"
+    new Date().toISOString().slice(0, 7)
   )
   const [loading, setLoading] = useState(false)
-  const [exporting, setExporting] = useState(false) // Estado separado para o botão de exportar
+  const [exporting, setExporting] = useState(false)
+  
+  // --- NOVOS ESTADOS PARA A TABELA ---
+  const [details, setDetails] = useState<any[]>([])
+  const [periodWindow, setPeriodWindow] = useState({ start: '', end: '' })
+  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // Efeito para carregar os detalhes sempre que mudar o período ou processar
+  useEffect(() => {
+    const fetchDetails = async () => {
+        const current = periods.find((p: any) => p.name === selectedPeriod)
+        if (current && current.status === 'PROCESSADO') {
+            setLoadingDetails(true)
+            const res = await getCalculationDetails(selectedPeriod)
+            if (res.results) {
+                setDetails(res.results)
+                setPeriodWindow(res.window)
+            }
+            setLoadingDetails(false)
+        } else {
+            setDetails([])
+            setPeriodWindow({ start: '', end: '' })
+        }
+    }
+    fetchDetails()
+  }, [selectedPeriod, periods])
 
   const handleProcess = async () => {
     const existing = periods.find((p: any) => p.name === selectedPeriod)
@@ -26,25 +51,21 @@ export default function CalculationClient({ periods, user }: any) {
     
     setLoading(true)
     const res = await processPeriod(selectedPeriod, user.email || 'Admin')
-    setLoading(false)
-
+    
     if (res.error) {
         alert(res.error)
     } else {
         alert(`Cálculo concluído com sucesso!\n\nFuncionários Processados: ${res.count}\nValor Total: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(res.total || 0)}`)
         window.location.reload()
     }
+    setLoading(false)
   }
 
-  // --- NOVA FUNÇÃO: EXPORTAR VALECARD ---
   const handleExportValecard = async () => {
     if (!currentPeriodData || currentPeriodData.status !== 'PROCESSADO') {
         return alert('É necessário processar a competência antes de exportar.')
     }
-
     setExporting(true)
-
-    // 1. Busca os dados completos no servidor
     const { data, error } = await getPeriodDataForExport(selectedPeriod)
     
     if (error || !data || data.length === 0) {
@@ -53,7 +74,6 @@ export default function CalculationClient({ periods, user }: any) {
         return
     }
 
-    // 2. Formata para o layout Valecard (Matrícula, Referência, Nome, Dt. Nascimento, CPF, Valor)
     const formatDate = (dateStr: string) => {
         if (!dateStr) return '';
         const [year, month, day] = dateStr.split('-');
@@ -67,25 +87,55 @@ export default function CalculationClient({ periods, user }: any) {
             'Referência': emp.department_id || 'GERAL',
             'Nome': r.employee_name,
             'Dt. Nascimento': formatDate(emp.birth_date),
-            'CPF': emp.cpf ? emp.cpf.replace(/\D/g, '') : '', // Apenas números
+            'CPF': emp.cpf ? emp.cpf.replace(/\D/g, '') : '', 
             'Valor': r.total_receivable
         }
     })
 
-    // 3. Gera e baixa o Excel
     const ws = XLSX.utils.json_to_sheet(dataToExport)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Pedido")
     const fileName = `Pedido_Valecard_${selectedPeriod}.xlsx`
     XLSX.writeFile(wb, fileName)
-
     setExporting(false)
   }
 
+  const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val)
+  
+  // Função auxiliar para determinar a regra da cesta
+  const getBasketRule = (details: any, salary: number, basketValue: number) => {
+      const unjust = details?.unjustifiedAbsences || 0
+
+      // 1. Se o benefício está ZERADO
+      if (basketValue === 0) {
+          // Se tem 3 ou mais faltas, o corte foi pela regra de faltas
+          if (unjust >= 3) {
+              return <span className="text-xs font-bold text-red-600">Cortado (3+ Faltas)</span>
+          }
+          // Se tem POUCAS faltas (< 3) e mesmo assim está zerado, foi pelo Teto Salarial
+          // (Não precisamos saber o valor exato do teto aqui, a lógica nos garante isso)
+          return <span className="text-xs text-slate-400">Salário &gt; Teto</span>
+      }
+
+      // 2. Se o benefício é MAIOR QUE ZERO (Regras de Desconto Proporcional)
+      if (unjust === 0) return <span className="text-xs font-bold text-green-600">Integral</span>
+      if (unjust === 1) return <span className="text-xs font-bold text-orange-600">Desc. 25%</span>
+      if (unjust === 2) return <span className="text-xs font-bold text-orange-700">Desc. 50%</span>
+      
+      return <span className="text-xs">-</span>
+  }
+
   const currentPeriodData = periods.find((p: any) => p.name === selectedPeriod)
+  
+  // Filtro da tabela
+  const filteredDetails = details.filter((d: any) => 
+    d.employee_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    d.employee_id.includes(searchTerm)
+  )
 
   return (
     <div className="space-y-6">
+      {/* HEADER DE CONTROLE */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <div>
             <h2 className="text-2xl font-bold text-slate-800">Apuração Mensal</h2>
@@ -114,54 +164,154 @@ export default function CalculationClient({ periods, user }: any) {
       </div>
 
       {currentPeriodData ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Users size={24}/></div>
-                <div>
-                    <p className="text-sm text-slate-500">Funcionários Processados</p>
-                    <p className="text-2xl font-bold text-slate-800">{currentPeriodData.total_employees}</p>
+        <>
+            {/* CARDS DE RESUMO */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Users size={24}/></div>
+                    <div>
+                        <p className="text-sm text-slate-500">Funcionários Processados</p>
+                        <p className="text-2xl font-bold text-slate-800">{currentPeriodData.total_employees}</p>
+                    </div>
                 </div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                <div className="p-3 bg-green-50 text-green-600 rounded-lg"><DollarSign size={24}/></div>
-                <div>
-                    <p className="text-sm text-slate-500">Valor Total da Folha</p>
-                    <p className="text-2xl font-bold text-green-600">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(currentPeriodData.total_value)}
-                    </p>
+                
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                    <div className="p-3 bg-green-50 text-green-600 rounded-lg"><DollarSign size={24}/></div>
+                    <div>
+                        <p className="text-sm text-slate-500">Valor Total da Folha</p>
+                        <p className="text-2xl font-bold text-green-600">
+                            {formatCurrency(currentPeriodData.total_value)}
+                        </p>
+                    </div>
                 </div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-                <div className="p-3 bg-purple-50 text-purple-600 rounded-lg"><Calendar size={24}/></div>
-                <div>
-                    <p className="text-sm text-slate-500">Status do Período</p>
-                    <span className={`inline-block px-3 py-1 text-xs font-bold rounded-full mt-1 ${
-                        currentPeriodData.status === 'PROCESSADO' 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-yellow-100 text-yellow-700'
-                    }`}>
-                        {currentPeriodData.status}
-                    </span>
-                    
-                    {/* --- BOTÃO DE EXPORTAÇÃO INSERIDO AQUI --- */}
-                    {currentPeriodData.status === 'PROCESSADO' && (
-                        <div className="mt-3">
-                             <button 
-                                onClick={handleExportValecard}
-                                disabled={exporting}
-                                className="flex items-center gap-2 text-xs font-bold text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
-                            >
-                                {exporting ? <Loader2 size={14} className="animate-spin"/> : <CreditCard size={14} />}
-                                {exporting ? 'Gerando...' : 'Baixar Arquivo Valecard'}
-                            </button>
+                
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                    <div className="p-3 bg-purple-50 text-purple-600 rounded-lg"><Calendar size={24}/></div>
+                    <div>
+                        <p className="text-sm text-slate-500">Status do Período</p>
+                        <div className="flex items-center gap-2">
+                            <span className={`inline-block px-3 py-1 text-xs font-bold rounded-full mt-1 ${
+                                currentPeriodData.status === 'PROCESSADO' 
+                                    ? 'bg-green-100 text-green-700' 
+                                    : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                                {currentPeriodData.status}
+                            </span>
+                            {currentPeriodData.status === 'PROCESSADO' && (
+                                <button 
+                                    onClick={handleExportValecard}
+                                    disabled={exporting}
+                                    className="ml-2 text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
+                                    title="Baixar Arquivo Valecard"
+                                >
+                                    {exporting ? <Loader2 size={18} className="animate-spin"/> : <CreditCard size={18} />}
+                                </button>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {/* TABELA DETALHADA */}
+            {currentPeriodData.status === 'PROCESSADO' && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="flex justify-between items-end">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <Calendar className="text-blue-600" size={20}/>
+                            {/* Agora periodWindow.start e end virão preenchidos do backend */}
+                            Janela de Cálculo: <span className="text-blue-600">{periodWindow.start || '--'}</span> até <span className="text-blue-600">{periodWindow.end || '--'}</span>
+                            </h3>
+                            <p className="text-sm text-slate-500">Detalhamento individual dos benefícios calculados.</p>
+                        </div>
+                        <div className="relative">
+                             <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                             <input 
+                                type="text" 
+                                placeholder="Buscar funcionário..." 
+                                className="pl-9 pr-4 py-2 border rounded-lg text-sm w-64 focus:ring-2 focus:ring-blue-500 outline-none"
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                             />
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        {loadingDetails ? (
+                            <div className="p-12 flex justify-center text-slate-500 items-center gap-2">
+                                <Loader2 className="animate-spin" /> Carregando detalhes...
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm text-slate-600">
+                                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                                        <tr>
+                                            <th className="px-6 py-3">Matrícula</th>
+                                            <th className="px-6 py-3">Nome</th>
+                                            <th className="px-6 py-3 text-center">F. Injust.</th>
+                                            <th className="px-6 py-3 text-center">Atestado/Férias</th>
+                                            <th className="px-6 py-3">VA Final</th>
+                                            <th className="px-6 py-3">Cesta Final</th>
+                                            <th className="px-6 py-3">Regra (Cesta)</th>
+                                            <th className="px-6 py-3">Ajustes</th>
+                                            <th className="px-6 py-3 font-bold text-slate-800 text-right">Total a Pagar</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {filteredDetails.length === 0 ? (
+                                            <tr><td colSpan={9} className="p-8 text-center text-slate-400">Nenhum funcionário encontrado.</td></tr>
+                                        ) : filteredDetails.map((row: any) => {
+                                            const details = row.calculation_details || {}
+                                            const justified = (details.totalAbsences || 0) - (details.unjustifiedAbsences || 0)
+                                            const adjustments = details.adjustmentsTotal || 0
+
+                                            return (
+                                                <tr key={row.id} className="hover:bg-slate-50 transition">
+                                                    <td className="px-6 py-3 font-medium">{row.employee_id}</td>
+                                                    <td className="px-6 py-3 font-medium text-slate-800">
+                                                        {row.employee_name}
+                                                        <div className="text-xs text-slate-400 font-normal">{row.employee_role}</div>
+                                                    </td>
+                                                    <td className="px-6 py-3 text-center">
+                                                        {details.unjustifiedAbsences > 0 ? (
+                                                            <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded">{details.unjustifiedAbsences}</span>
+                                                        ) : '-'}
+                                                    </td>
+                                                    <td className="px-6 py-3 text-center text-slate-500">
+                                                        {justified > 0 ? justified : '-'}
+                                                    </td>
+                                                    <td className="px-6 py-3 text-slate-700">
+                                                        {formatCurrency(row.va_value)}
+                                                    </td>
+                                                    <td className="px-6 py-3 text-slate-700">
+                                                        {formatCurrency(row.basket_value)}
+                                                    </td>
+                                                    <td className="px-6 py-3">
+                                                        {getBasketRule(details, row.employees?.salary, row.basket_value)}
+                                                    </td>
+                                                    <td className="px-6 py-3">
+                                                        {adjustments !== 0 ? (
+                                                            <span className={adjustments > 0 ? 'text-green-600' : 'text-red-600'}>
+                                                                {formatCurrency(adjustments)}
+                                                            </span>
+                                                        ) : '-'}
+                                                    </td>
+                                                    <td className="px-6 py-3 text-right font-bold text-slate-900 bg-slate-50/50">
+                                                        {formatCurrency(row.total_receivable)}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </>
       ) : (
+        // STATE VAZIO
         <div className="text-center py-16 bg-slate-50 border border-dashed border-slate-300 rounded-xl">
             <Calendar className="mx-auto h-12 w-12 text-slate-300 mb-3" />
             <h3 className="text-lg font-medium text-slate-900">Nenhum dado encontrado</h3>
