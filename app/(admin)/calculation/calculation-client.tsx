@@ -3,8 +3,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Play, Calendar, DollarSign, Users, CreditCard, Loader2, Search } from 'lucide-react'
-import { processPeriod, getPeriodDataForExport, getCalculationDetails } from '@/app/actions/calculation' // Importe a nova função
+import { 
+  Play, Calendar, DollarSign, Users, CreditCard, Loader2, Search, 
+  ShoppingBasket, X, ChevronLeft, ChevronRight 
+} from 'lucide-react'
+import { processPeriod, getPeriodDataForExport, getCalculationDetails } from '@/app/actions/calculation' 
 import * as XLSX from 'xlsx'
 
 export default function CalculationClient({ periods, user }: any) {
@@ -14,13 +17,18 @@ export default function CalculationClient({ periods, user }: any) {
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   
-  // --- NOVOS ESTADOS PARA A TABELA ---
+  // --- ESTADOS DA TABELA ---
   const [details, setDetails] = useState<any[]>([])
   const [periodWindow, setPeriodWindow] = useState({ start: '', end: '' })
+  const [basketLimit, setBasketLimit] = useState(1780) // Valor padrão, atualizado pelo back
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Efeito para carregar os detalhes sempre que mudar o período ou processar
+  // --- PAGINAÇÃO E FILTROS ---
+  const [currentPage, setCurrentPage] = useState(1)
+  const [showBasketOnly, setShowBasketOnly] = useState(false)
+  const itemsPerPage = 20
+
   useEffect(() => {
     const fetchDetails = async () => {
         const current = periods.find((p: any) => p.name === selectedPeriod)
@@ -30,6 +38,7 @@ export default function CalculationClient({ periods, user }: any) {
             if (res.results) {
                 setDetails(res.results)
                 setPeriodWindow(res.window)
+                if (res.basketLimit) setBasketLimit(res.basketLimit)
             }
             setLoadingDetails(false)
         } else {
@@ -39,6 +48,9 @@ export default function CalculationClient({ periods, user }: any) {
     }
     fetchDetails()
   }, [selectedPeriod, periods])
+
+  // --- CORREÇÃO: REMOVIDO O USEEFFECT QUE CAUSAVA O ERRO ---
+  // A lógica de resetar a página agora está diretamente nos inputs (onChange/onClick)
 
   const handleProcess = async () => {
     const existing = periods.find((p: any) => p.name === selectedPeriod)
@@ -102,22 +114,17 @@ export default function CalculationClient({ periods, user }: any) {
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val)
   
-  // Função auxiliar para determinar a regra da cesta
+  // Função da Regra (Atualizada e segura)
   const getBasketRule = (details: any, salary: number, basketValue: number) => {
       const unjust = details?.unjustifiedAbsences || 0
-
-      // 1. Se o benefício está ZERADO
+      
+      // Se zerado
       if (basketValue === 0) {
-          // Se tem 3 ou mais faltas, o corte foi pela regra de faltas
-          if (unjust >= 3) {
-              return <span className="text-xs font-bold text-red-600">Cortado (3+ Faltas)</span>
-          }
-          // Se tem POUCAS faltas (< 3) e mesmo assim está zerado, foi pelo Teto Salarial
-          // (Não precisamos saber o valor exato do teto aqui, a lógica nos garante isso)
+          if (unjust >= 3) return <span className="text-xs font-bold text-red-600">Cortado (3+ Faltas)</span>
           return <span className="text-xs text-slate-400">Salário &gt; Teto</span>
       }
-
-      // 2. Se o benefício é MAIOR QUE ZERO (Regras de Desconto Proporcional)
+      
+      // Se recebe algo
       if (unjust === 0) return <span className="text-xs font-bold text-green-600">Integral</span>
       if (unjust === 1) return <span className="text-xs font-bold text-orange-600">Desc. 25%</span>
       if (unjust === 2) return <span className="text-xs font-bold text-orange-700">Desc. 50%</span>
@@ -127,11 +134,30 @@ export default function CalculationClient({ periods, user }: any) {
 
   const currentPeriodData = periods.find((p: any) => p.name === selectedPeriod)
   
-  // Filtro da tabela
-  const filteredDetails = details.filter((d: any) => 
-    d.employee_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    d.employee_id.includes(searchTerm)
-  )
+  // --- LÓGICA DE FILTRAGEM ---
+  const filteredDetails = details.filter((d: any) => {
+    // 1. Filtro Texto
+    const matchesSearch = d.employee_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          d.employee_id.includes(searchTerm)
+    
+    // 2. Filtro Cesta (Elegíveis: Salário <= Teto)
+    // Mostra quem recebe ou quem foi cortado por faltas (mas tinha direito pelo salário)
+    const matchesBasket = showBasketOnly 
+        ? (d.employees?.salary <= basketLimit) 
+        : true
+
+    return matchesSearch && matchesBasket
+  })
+
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const totalItems = filteredDetails.length
+  const totalPages = Math.ceil(totalItems / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const currentData = filteredDetails.slice(startIndex, endIndex)
+
+  // Contagem para o botão de filtro
+  const basketEligibleCount = details.filter((d:any) => d.employees?.salary <= basketLimit).length
 
   return (
     <div className="space-y-6">
@@ -198,15 +224,17 @@ export default function CalculationClient({ periods, user }: any) {
                                 {currentPeriodData.status}
                             </span>
                             {currentPeriodData.status === 'PROCESSADO' && (
+                            <div className="mt-2">
                                 <button 
                                     onClick={handleExportValecard}
                                     disabled={exporting}
-                                    className="ml-2 text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
-                                    title="Baixar Arquivo Valecard"
+                                    className="flex items-center gap-2 text-xs font-bold text-purple-600 hover:text-purple-800 transition disabled:opacity-50"
                                 >
-                                    {exporting ? <Loader2 size={18} className="animate-spin"/> : <CreditCard size={18} />}
+                                    {exporting ? <Loader2 size={14} className="animate-spin"/> : <CreditCard size={14} />}
+                                    {exporting ? 'Gerando...' : 'Baixar Arquivo Valecard'}
                                 </button>
-                            )}
+                            </div>
+                        )}
                         </div>
                     </div>
                 </div>
@@ -215,24 +243,48 @@ export default function CalculationClient({ periods, user }: any) {
             {/* TABELA DETALHADA */}
             {currentPeriodData.status === 'PROCESSADO' && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="flex justify-between items-end">
+                    <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-4">
                         <div>
-                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Calendar className="text-blue-600" size={20}/>
-                            {/* Agora periodWindow.start e end virão preenchidos do backend */}
-                            Janela de Cálculo: <span className="text-blue-600">{periodWindow.start || '--'}</span> até <span className="text-blue-600">{periodWindow.end || '--'}</span>
-                            </h3>
-                            <p className="text-sm text-slate-500">Detalhamento individual dos benefícios calculados.</p>
+                             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <Calendar className="text-blue-600" size={20}/>
+                                Janela de Cálculo: <span className="text-blue-600">{periodWindow.start}</span> até <span className="text-blue-600">{periodWindow.end}</span>
+                             </h3>
+                             <p className="text-sm text-slate-500">Detalhamento individual dos benefícios calculados.</p>
                         </div>
-                        <div className="relative">
-                             <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                             <input 
-                                type="text" 
-                                placeholder="Buscar funcionário..." 
-                                className="pl-9 pr-4 py-2 border rounded-lg text-sm w-64 focus:ring-2 focus:ring-blue-500 outline-none"
-                                value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
-                             />
+
+                        {/* BARRA DE FERRAMENTAS DA TABELA */}
+                        <div className="flex flex-col md:flex-row gap-3 items-center">
+                             {/* Botão de Filtro Cesta (CORRIGIDO) */}
+                             <button 
+                                onClick={() => {
+                                    setShowBasketOnly(!showBasketOnly)
+                                    setCurrentPage(1) // <--- Reseta aqui no clique
+                                }}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
+                                    showBasketOnly 
+                                    ? 'bg-orange-50 border-orange-300 text-orange-800 font-bold' 
+                                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                }`}
+                            >
+                                <ShoppingBasket size={16} className={showBasketOnly ? 'text-orange-600' : 'text-slate-400'} />
+                                <span>Elegíveis Cesta ({basketEligibleCount})</span>
+                                {showBasketOnly && <X size={14} className="ml-1 text-orange-400" />}
+                            </button>
+
+                             <div className="relative w-full md:w-auto">
+                                <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                                {/* Input de Busca (CORRIGIDO) */}
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar funcionário..." 
+                                    className="pl-9 pr-4 py-2 border rounded-lg text-sm w-full md:w-64 focus:ring-2 focus:ring-blue-500 outline-none"
+                                    value={searchTerm}
+                                    onChange={e => {
+                                        setSearchTerm(e.target.value)
+                                        setCurrentPage(1) // <--- Reseta aqui ao digitar
+                                    }}
+                                />
+                             </div>
                         </div>
                     </div>
 
@@ -242,76 +294,105 @@ export default function CalculationClient({ periods, user }: any) {
                                 <Loader2 className="animate-spin" /> Carregando detalhes...
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm text-slate-600">
-                                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                                        <tr>
-                                            <th className="px-6 py-3">Matrícula</th>
-                                            <th className="px-6 py-3">Nome</th>
-                                            <th className="px-6 py-3 text-center">F. Injust.</th>
-                                            <th className="px-6 py-3 text-center">Atestado/Férias</th>
-                                            <th className="px-6 py-3">VA Final</th>
-                                            <th className="px-6 py-3">Cesta Final</th>
-                                            <th className="px-6 py-3">Regra (Cesta)</th>
-                                            <th className="px-6 py-3">Ajustes</th>
-                                            <th className="px-6 py-3 font-bold text-slate-800 text-right">Total a Pagar</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {filteredDetails.length === 0 ? (
-                                            <tr><td colSpan={9} className="p-8 text-center text-slate-400">Nenhum funcionário encontrado.</td></tr>
-                                        ) : filteredDetails.map((row: any) => {
-                                            const details = row.calculation_details || {}
-                                            const justified = (details.totalAbsences || 0) - (details.unjustifiedAbsences || 0)
-                                            const adjustments = details.adjustmentsTotal || 0
+                            <>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-sm text-slate-600">
+                                        <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                                            <tr>
+                                                <th className="px-6 py-3">Matrícula</th>
+                                                <th className="px-6 py-3">Nome</th>
+                                                <th className="px-6 py-3 text-center">F. Injust.</th>
+                                                <th className="px-6 py-3 text-center">Atestado/Férias</th>
+                                                <th className="px-6 py-3">VA Final</th>
+                                                <th className="px-6 py-3">Cesta Final</th>
+                                                <th className="px-6 py-3">Regra (Cesta)</th>
+                                                <th className="px-6 py-3">Ajustes</th>
+                                                <th className="px-6 py-3 font-bold text-slate-800 text-right">Total a Pagar</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {currentData.length === 0 ? (
+                                                <tr><td colSpan={9} className="p-8 text-center text-slate-400">
+                                                    {showBasketOnly ? "Nenhum funcionário elegível encontrado." : "Nenhum resultado encontrado."}
+                                                </td></tr>
+                                            ) : currentData.map((row: any) => {
+                                                const details = row.calculation_details || {}
+                                                const justified = (details.totalAbsences || 0) - (details.unjustifiedAbsences || 0)
+                                                const adjustments = details.adjustmentsTotal || 0
 
-                                            return (
-                                                <tr key={row.id} className="hover:bg-slate-50 transition">
-                                                    <td className="px-6 py-3 font-medium">{row.employee_id}</td>
-                                                    <td className="px-6 py-3 font-medium text-slate-800">
-                                                        {row.employee_name}
-                                                        <div className="text-xs text-slate-400 font-normal">{row.employee_role}</div>
-                                                    </td>
-                                                    <td className="px-6 py-3 text-center">
-                                                        {details.unjustifiedAbsences > 0 ? (
-                                                            <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded">{details.unjustifiedAbsences}</span>
-                                                        ) : '-'}
-                                                    </td>
-                                                    <td className="px-6 py-3 text-center text-slate-500">
-                                                        {justified > 0 ? justified : '-'}
-                                                    </td>
-                                                    <td className="px-6 py-3 text-slate-700">
-                                                        {formatCurrency(row.va_value)}
-                                                    </td>
-                                                    <td className="px-6 py-3 text-slate-700">
-                                                        {formatCurrency(row.basket_value)}
-                                                    </td>
-                                                    <td className="px-6 py-3">
-                                                        {getBasketRule(details, row.employees?.salary, row.basket_value)}
-                                                    </td>
-                                                    <td className="px-6 py-3">
-                                                        {adjustments !== 0 ? (
-                                                            <span className={adjustments > 0 ? 'text-green-600' : 'text-red-600'}>
-                                                                {formatCurrency(adjustments)}
-                                                            </span>
-                                                        ) : '-'}
-                                                    </td>
-                                                    <td className="px-6 py-3 text-right font-bold text-slate-900 bg-slate-50/50">
-                                                        {formatCurrency(row.total_receivable)}
-                                                    </td>
-                                                </tr>
-                                            )
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
+                                                return (
+                                                    <tr key={row.id} className="hover:bg-slate-50 transition">
+                                                        <td className="px-6 py-3 font-medium">{row.employee_id}</td>
+                                                        <td className="px-6 py-3 font-medium text-slate-800">
+                                                            {row.employee_name}
+                                                            <div className="text-xs text-slate-400 font-normal">{row.employee_role}</div>
+                                                        </td>
+                                                        <td className="px-6 py-3 text-center">
+                                                            {details.unjustifiedAbsences > 0 ? (
+                                                                <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded">{details.unjustifiedAbsences}</span>
+                                                            ) : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-3 text-center text-slate-500">
+                                                            {justified > 0 ? justified : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-3 text-slate-700">
+                                                            {formatCurrency(row.va_value)}
+                                                        </td>
+                                                        <td className="px-6 py-3 text-slate-700">
+                                                            {formatCurrency(row.basket_value)}
+                                                        </td>
+                                                        <td className="px-6 py-3">
+                                                            {getBasketRule(details, row.employees?.salary, row.basket_value)}
+                                                        </td>
+                                                        <td className="px-6 py-3">
+                                                            {adjustments !== 0 ? (
+                                                                <span className={adjustments > 0 ? 'text-green-600' : 'text-red-600'}>
+                                                                    {formatCurrency(adjustments)}
+                                                                </span>
+                                                            ) : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-3 text-right font-bold text-slate-900 bg-slate-50/50">
+                                                            {formatCurrency(row.total_receivable)}
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                {/* CONTROLE DE PAGINAÇÃO */}
+                                {totalItems > 0 && (
+                                    <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between">
+                                        <span className="text-sm text-slate-500">
+                                            Mostrando <b>{startIndex + 1}</b> a <b>{Math.min(endIndex, totalItems)}</b> de <b>{totalItems}</b> registros
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} 
+                                                disabled={currentPage === 1} 
+                                                className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition"
+                                            >
+                                                <ChevronLeft size={16}/>
+                                            </button>
+                                            <span className="text-sm font-medium px-2">Página {currentPage} de {totalPages}</span>
+                                            <button 
+                                                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} 
+                                                disabled={currentPage === totalPages} 
+                                                className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition"
+                                            >
+                                                <ChevronRight size={16}/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
             )}
         </>
       ) : (
-        // STATE VAZIO
         <div className="text-center py-16 bg-slate-50 border border-dashed border-slate-300 rounded-xl">
             <Calendar className="mx-auto h-12 w-12 text-slate-300 mb-3" />
             <h3 className="text-lg font-medium text-slate-900">Nenhum dado encontrado</h3>
