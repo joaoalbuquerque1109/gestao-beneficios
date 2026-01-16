@@ -1,6 +1,8 @@
 import { Sidebar } from '@/components/Sidebar'
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
+import { Suspense } from 'react'
+import LoadingSpinner from '@/components/LoadingSpinner'
 
 export default async function AdminLayout({
   children,
@@ -22,7 +24,9 @@ export default async function AdminLayout({
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-6 overflow-x-hidden">
-        {children}
+        <Suspense fallback={<LoadingSpinner fullScreen />}>
+          {children}
+        </Suspense>
       </main>
     </div>
   )
