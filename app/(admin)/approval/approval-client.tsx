@@ -41,7 +41,7 @@ export default function ApprovalClient({ periods, user }: any) {
             <tbody className="divide-y divide-slate-100">
                 {periods.map((p: any) => (
                     <tr key={p.id}>
-                        <td className="px-6 py-4 font-bold">{p.id}</td>
+                        <td className="px-6 py-4 font-bold">{p.name}</td>
                         <td className="px-6 py-4">
                             <span className={`px-2 py-1 rounded text-xs font-bold ${
                                 p.status === 'APROVADO' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'

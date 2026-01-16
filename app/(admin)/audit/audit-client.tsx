@@ -78,7 +78,7 @@ export default function AuditClient({ records, approvedPeriods, user }: any) {
               ) : (
                 records.map((r: any) => (
                   <tr key={r.id} className="hover:bg-slate-50 transition">
-                    <td className="px-6 py-4 font-bold text-slate-800">{r.id}</td>
+                    <td className="px-6 py-4 font-bold text-slate-800">{r.name}</td>
                     <td className="px-6 py-4 font-medium text-green-700">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(r.total_value)}
                     </td>

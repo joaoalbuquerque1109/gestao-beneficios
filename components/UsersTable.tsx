@@ -1,8 +1,9 @@
 'use client'
 
-import { Mail, Shield, Calendar } from 'lucide-react'
+import { Mail, Shield, Calendar, Plus } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { useState } from 'react'
 
 interface User {
   id: string
@@ -17,10 +18,25 @@ interface UsersTableProps {
 }
 
 export default function UsersTable({ users, total }: UsersTableProps) {
+  const [openAbsenceForm, setOpenAbsenceForm] = useState<string | null>(null)
+  const [absenceData, setAbsenceData] = useState({ date: '', reason: '' })
+
+  const handleAddAbsence = (userId: string) => {
+    setOpenAbsenceForm(userId)
+    setAbsenceData({ date: '', reason: '' })
+  }
+
+  const handleSubmitAbsence = (userId: string) => {
+    // TODO: Implementar chamada de server action para adicionar falta
+    console.log('Adicionando falta para usuário:', userId, absenceData)
+    setOpenAbsenceForm(null)
+    setAbsenceData({ date: '', reason: '' })
+  }
+
   const getRoleBadgeColor = (role: string) => {
     switch (role?.toUpperCase()) {
       case 'ADMIN':
-        return 'bg-red-100 text-red-800'
+        return 'bg-yellow-100 text-yellow-800'
       case 'RH':
         return 'bg-blue-100 text-blue-800'
       case 'FINANCE':
@@ -54,6 +70,9 @@ export default function UsersTable({ users, total }: UsersTableProps) {
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">
                   Data de Criação
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">
+                  Ações
                 </th>
               </tr>
             </thead>

@@ -8,7 +8,7 @@ export async function saveAbsencesBatch(absences: any[]) {
   const supabase = await createClient()
 
   const records = absences.map(a => ({
-    employee_id: a.employeeId,
+    employee_id: a.employee_id || a.employeeId,
     date: a.date,
     reason: a.reason || 'Falta Registrada',
     type: (a.type && ['INJUSTIFICADA', 'FALTA', 'SUSPENSAO'].includes(a.type.toUpperCase())) 
