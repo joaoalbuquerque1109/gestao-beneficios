@@ -55,19 +55,15 @@ export async function getPeriodsList(params?: { limit?: number; offset?: number;
 
 export async function getUsersList(params?: { limit?: number; offset?: number }) {
   const supabase = await createClient()
-  const limit = params?.limit || 100
-  const offset = params?.offset || 0
 
-  const { data, error, count } = await supabase
+  const { data: user_profiles, error } = await supabase
     .from('user_profiles')
-    .select('id, email, role, created_at', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1)
+    .select('*')
 
   if (error) {
     console.error('Erro ao buscar usuários:', error)
     return { data: [], error: error.message, total: 0 }
   }
 
-  return { data: data || [], error: null, total: count || 0 }
+  return { data: user_profiles || [], error: null, total: user_profiles?.length || 0 }
 }
