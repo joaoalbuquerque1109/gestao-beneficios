@@ -36,7 +36,7 @@ export function CalculationHeader({
     else toast.info('Competência reaberta para manutenção.')
   }
 
-  const isDownloadAllowed = ['APPROVED', 'CLOSED'].includes(periodStatus)
+  const isDownloadAllowed = ['APROVADO', 'CLOSED'].includes(periodStatus)
   const isProcessed = periodStatus === 'PROCESSADO'
   const canManage = ['ADMIN', 'RH'].includes(userRole)
 

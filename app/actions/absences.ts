@@ -4,6 +4,60 @@
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
+export async function getActiveEmployees() {
+  const supabase = await createClient()
+  
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id, name')
+    .neq('status', 'INATIVO')
+    .order('name')
+
+  if (error) {
+    console.error('Erro ao buscar funcionários:', error)
+    return []
+  }
+  return data
+}
+
+export async function saveAbsence(data: {
+  employeeId: string
+  date: string
+  reason: string
+  type: string
+}) {
+  const supabase = await createClient()
+
+  if (!data.employeeId || !data.date) {
+    return { error: 'Matrícula e Data são obrigatórias.' }
+  }
+
+  // --- CORREÇÃO DE SEGURANÇA ---
+  // Forçamos o type para UpperCase para garantir que o cálculo encontre (INJUSTIFICADA vs Injustificada)
+  const safeType = data.type ? data.type.toUpperCase() : 'INJUSTIFICADA';
+
+  const record = {
+    employee_id: data.employeeId,
+    date: data.date,
+    reason: data.reason || 'Falta Manual',
+    type: safeType // Usa o valor tratado
+  }
+
+  const { error } = await supabase
+    .from('absences')
+    .insert(record)
+  
+  if (error) {
+    if (error.code === '23505') {
+       return { error: 'Já existe uma falta registrada para este funcionário nesta data.' }
+    }
+    return { error: 'Erro ao salvar falta.' }
+  }
+
+  revalidatePath('/absences')
+  return { success: true }
+}
+
 export async function saveAbsencesBatch(absences: any[]) {
   const supabase = await createClient()
 
@@ -16,23 +70,20 @@ export async function saveAbsencesBatch(absences: any[]) {
           : 'JUSTIFICADA'
   }))
 
-  // Use ignoreDuplicates: true para ignorar erros se a falta já existir naquele dia
   const { error } = await supabase
     .from('absences')
     .insert(records)
-    .select('*') // Para retornar a contagem correta
+    .select('*')
 
   if (error) {
-    // Código 23505 é violação de chave única (Unique Violation) no Postgres
     if (error.code === '23505') {
-       return { error: 'Algumas faltas já estavam cadastradas. As novas foram ignoradas.' }
+       return { error: 'Algumas faltas já estavam cadastradas (duplicadas). Importação parcial realizada.' }
     }
     console.error('Erro ao salvar faltas:', error)
-    return { error: 'Erro ao salvar dados. Verifique matrículas e datas.' }
+    return { error: 'Erro ao salvar dados.' }
   }
 
   revalidatePath('/absences')
-  // Se usar select() no insert, o count vem na resposta
   return { success: true, count: records.length } 
 }
 
