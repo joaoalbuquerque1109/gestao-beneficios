@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner"; // Componente de notificações
 import { Suspense } from "react";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import { SpeedInsights } from "@vercel/speed-insights/next"
 import "./globals.css";
 
 const geistSans = Geist({
@@ -43,6 +44,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} h-full bg-slate-50 text-slate-900`}
       >
+        <SpeedInsights/>
         {/* Renderiza a aplicação com loading durante transições */}
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           {children}

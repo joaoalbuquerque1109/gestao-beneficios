@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
+import Image from 'next/image'
 
 export default function AdminLayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -33,7 +34,13 @@ export default function AdminLayoutWrapper({ children }: { children: React.React
             {/* Ações Mobile (Sair / Avatar) */}
             <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs border border-blue-200">
-                    IC
+                    <Image 
+                        src="/favicon.ico" 
+                        alt="Logo" 
+                        width={20} 
+                        height={20} 
+                        className="object-contain"
+                    />
                 </div>
             </div>
         </header>
