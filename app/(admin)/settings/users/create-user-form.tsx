@@ -55,9 +55,9 @@ export default function CreateUserForm() {
             }`}
           >
             {state.type === 'success' ? (
-              <CheckCircle2 size={18} className="flex-shrink-0" />
+              <CheckCircle2 size={18} className="shrink-0" />
             ) : (
-              <AlertCircle size={18} className="flex-shrink-0" />
+              <AlertCircle size={18} className="shrink-0" />
             )}
             <span>{state.message}</span>
           </div>
@@ -123,7 +123,6 @@ export default function CreateUserForm() {
           >
             <option value="USER">Usuário Padrão</option>
             <option value="RH">Analista RH</option>
-            <option value="FINANCE">Analista Financeiro</option>
             <option value="ADMIN">Administrador</option>
           </select>
         </div>
