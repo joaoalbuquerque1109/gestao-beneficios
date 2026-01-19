@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client' // Importação corrigida
-import { ShieldCheck, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
+import { AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
+import Image from 'next/image'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -47,7 +48,13 @@ export default function LoginPage() {
       <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
-            <ShieldCheck size={32} />
+            <Image 
+                src="/favicon.ico" 
+                alt="Logo" 
+                width={52} 
+                height={52} 
+                className="object-contain"
+            />
           </div>
           <h1 className="text-2xl font-bold text-slate-800">Acesso ao Sistema</h1>
           <p className="text-slate-500 text-sm mt-2">Gestão de Benefícios Valecard</p>
@@ -100,7 +107,7 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
           >
-            {loading ? <Loader2 className="animate-spin" /> : 'Entrar no Sistema'}
+            {loading ? <Loader2 className="animate-spin" /> : 'Entrar'}
           </button>
         </form>
       </div>
