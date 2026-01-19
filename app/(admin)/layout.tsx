@@ -1,8 +1,6 @@
-import { Sidebar } from '@/components/Sidebar'
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import { Suspense } from 'react'
-import LoadingSpinner from '@/components/LoadingSpinner'
+import AdminLayoutWrapper from '@/components/AdminLayoutWrapper'
 
 export default async function AdminLayout({
   children,
@@ -11,7 +9,7 @@ export default async function AdminLayout({
 }) {
   const supabase = await createClient()
 
-  // Verifica sessão no servidor. Se não tiver, tchau!
+  // 1. Verificação de Segurança (Server Side)
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -20,14 +18,10 @@ export default async function AdminLayout({
     redirect('/login')
   }
 
+  // 2. Renderiza o Layout Cliente
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 md:ml-64 p-6 overflow-x-hidden">
-        <Suspense fallback={<LoadingSpinner fullScreen />}>
-          {children}
-        </Suspense>
-      </main>
-    </div>
+    <AdminLayoutWrapper>
+      {children}
+    </AdminLayoutWrapper>
   )
 }

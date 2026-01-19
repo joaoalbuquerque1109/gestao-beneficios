@@ -2,7 +2,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Trash2, FileSpreadsheet, Plus, X, Save, Search, Check, CalendarDays } from 'lucide-react'
+import { Upload, Trash2, FileSpreadsheet, Plus, X, Save, Search, Check, CalendarDays, ChevronLeft, ChevronRight, Calendar, User } from 'lucide-react'
 import { parseAbsences } from '@/utils/excel-parser'
 import { saveAbsencesBatch, deleteAbsence, getActiveEmployees } from '@/app/actions/absences'
 
@@ -10,16 +10,19 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
   const [loading, setLoading] = useState(false)
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7))
 
+  // Paginação
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 20
+
   // --- ESTADOS DO MODAL MANUAL ---
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [employeesList, setEmployeesList] = useState<any[]>([])
   
-  // --- ESTADOS DO AUTOCOMPLETE (PESQUISA) ---
+  // --- ESTADOS DO AUTOCOMPLETE ---
   const [searchTerm, setSearchTerm] = useState('')
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Form do Modal (Agora com startDate e endDate)
   const [manualForm, setManualForm] = useState({
     employeeId: '',
     startDate: '',
@@ -28,12 +31,10 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
     type: 'INJUSTIFICADA'
   })
 
-  // Carrega lista de funcionários
   useEffect(() => {
     getActiveEmployees().then(setEmployeesList)
   }, [])
 
-  // Fecha o dropdown se clicar fora
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -44,7 +45,11 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // 1. Upload Excel
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [monthFilter])
+
+  // Lógicas de Upload e Salvar (Mantidas iguais)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return
     setLoading(true)
@@ -69,62 +74,39 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
     }
   }
 
-  // 2. Salvar Manual (Agora suporta Múltiplos Dias)
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Validações
     if (!manualForm.employeeId) return alert("Selecione um funcionário.")
     if (!manualForm.startDate) return alert("Selecione a data inicial.")
     
-    // Se não tiver data final, assume que é o mesmo dia (1 dia de falta)
     const finalDate = manualForm.endDate || manualForm.startDate
-
     if (finalDate < manualForm.startDate) return alert("A data final não pode ser menor que a inicial.")
 
     setLoading(true)
-
-    // --- LÓGICA DE GERAR INTERVALO DE DATAS ---
     const absencesToSave = []
-    
-    // Cria objetos Date para o loop (usando T12:00:00 para evitar problemas de fuso)
     const current = new Date(manualForm.startDate + 'T12:00:00')
     const end = new Date(finalDate + 'T12:00:00')
 
-    // Loop: Enquanto data atual <= data final
     while (current <= end) {
         absencesToSave.push({
             employeeId: manualForm.employeeId,
-            date: current.toISOString().split('T')[0], // YYYY-MM-DD
+            date: current.toISOString().split('T')[0],
             reason: manualForm.reason,
             type: manualForm.type
         })
-        // Avança 1 dia
         current.setDate(current.getDate() + 1)
     }
 
-    // Reutilizamos a função de Batch (Lote) que já existe para o Excel
     const res = await saveAbsencesBatch(absencesToSave)
-    
     setLoading(false)
 
     if (res.error) {
         alert(res.error)
     } else {
-        const msg = absencesToSave.length > 1 
-            ? `${absencesToSave.length} faltas lançadas com sucesso!`
-            : 'Falta lançada com sucesso!'
-            
+        const msg = absencesToSave.length > 1 ? `${absencesToSave.length} faltas lançadas!` : 'Falta lançada!'
         alert(msg)
         setIsModalOpen(false)
-        // Resetar form
-        setManualForm({ 
-            employeeId: '', 
-            startDate: '', 
-            endDate: '', 
-            reason: '', 
-            type: 'INJUSTIFICADA' 
-        })
+        setManualForm({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'INJUSTIFICADA' })
         setSearchTerm('')
         window.location.reload()
     }
@@ -137,7 +119,7 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
     }
   }
 
-  // Lógica de Filtro do Autocomplete
+  // Filtros e Paginação
   const filteredEmployees = employeesList.filter(emp => 
     emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     emp.id.toLowerCase().includes(searchTerm.toLowerCase())
@@ -150,93 +132,184 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
   }
 
   const filteredTable = initialAbsences.filter(a => a.date.startsWith(monthFilter))
+  
+  const totalItems = filteredTable.length
+  const totalPages = Math.ceil(totalItems / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const currentData = filteredTable.slice(startIndex, endIndex)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 flex flex-col h-[calc(100dvh-3rem)]">
+      
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+      <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0 px-2 md:px-0">
         <div>
-            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+            <h2 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
             <FileSpreadsheet className="text-orange-600" /> Gestão de Faltas
             </h2>
-            <p className="text-sm text-slate-500">Controle de ausências para a folha</p>
+            <p className="text-xs md:text-sm text-slate-500">Controle de ausências para a folha</p>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center">
+        <div className="grid grid-cols-2 sm:flex flex-wrap gap-2 items-center">
+            {/* Seletor de Mês */}
             <input 
                 type="month" 
                 value={monthFilter}
                 onChange={(e) => setMonthFilter(e.target.value)}
-                className="border p-2 rounded-lg text-sm bg-white"
+                className="col-span-2 sm:col-span-1 border p-2 rounded-lg text-sm bg-white h-10 w-full sm:w-auto"
             />
+
+            {/* Botões */}
             <button 
                 onClick={() => setIsModalOpen(true)}
-                className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition shadow-sm"
+                className="flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition shadow-sm h-10 text-sm font-bold"
             >
                 <Plus size={18} />
-                <span className="hidden md:inline">Lançar Manual</span>
+                <span className="hidden sm:inline">Lançar Manual</span>
+                <span className="sm:hidden">Lançar</span>
             </button>
-            <label className={`flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 transition shadow-sm ${loading ? 'opacity-50' : ''}`}>
+
+            <label className={`flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 transition shadow-sm h-10 text-sm font-bold ${loading ? 'opacity-50' : ''}`}>
                 <Upload size={18} />
-                <span className="hidden md:inline">{loading ? '...' : 'Importar Excel'}</span>
+                <span className="hidden sm:inline">{loading ? '...' : 'Importar Excel'}</span>
+                <span className="sm:hidden">Importar</span>
                 <input type="file" className="hidden" accept=".xlsx" onChange={handleFileUpload} disabled={loading} />
             </label>
         </div>
       </div>
 
-      {/* TABELA */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+      {/* ÁREA DE DADOS */}
+      <div className="bg-slate-50 md:bg-white md:rounded-xl md:shadow-sm md:border md:border-slate-200 flex flex-col flex-1 min-h-0 overflow-hidden">
+        
+        <div className="hidden md:flex p-4 border-b border-slate-100 justify-between items-center bg-white shrink-0">
             <span className="font-semibold text-slate-700">Registros em {monthFilter}</span>
-            <span className="text-xs bg-white border px-2 py-1 rounded text-slate-500">Total: {filteredTable.length}</span>
+            <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 font-bold">Total: {filteredTable.length}</span>
         </div>
-        <table className="w-full text-left text-sm text-slate-600">
-          <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
-            <tr>
-              <th className="px-6 py-3">Data</th>
-              <th className="px-6 py-3">Funcionário</th>
-              <th className="px-6 py-3">Tipo</th>
-              <th className="px-6 py-3">Motivo</th>
-              <th className="px-6 py-3 text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredTable.length === 0 ? (
-                <tr><td colSpan={5} className="text-center p-8 text-slate-400">Nenhuma falta registrada neste mês.</td></tr>
-            ) : (
-                filteredTable.map((abs) => (
-                <tr key={abs.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-3 font-medium text-slate-800">
-                        {new Date(abs.date + 'T12:00:00').toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="px-6 py-3">
-                        <div className="font-medium text-slate-900">{abs.employees?.name || '---'}</div>
-                        <div className="text-xs text-slate-400">Mat: {abs.employee_id}</div>
-                    </td>
-                    <td className="px-6 py-3">
-                        <span className={`text-xs px-2 py-1 rounded-full font-bold ${
-                            abs.type === 'INJUSTIFICADA' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
-                            {abs.type}
-                        </span>
-                    </td>
-                    <td className="px-6 py-3 text-slate-500">{abs.reason}</td>
-                    <td className="px-6 py-3 text-right">
-                    <button onClick={() => handleDelete(abs.id)} className="text-red-500 hover:text-red-700 p-2">
-                        <Trash2 size={16} />
+        
+        <div className="overflow-auto flex-1 relative p-2 md:p-0">
+            
+            {/* MOBILE: CARDS */}
+            <div className="md:hidden space-y-3 pb-20">
+                {currentData.length === 0 ? (
+                    <div className="text-center p-8 text-slate-400 bg-white rounded-lg border border-dashed border-slate-300">
+                        Nenhuma falta neste mês.
+                    </div>
+                ) : currentData.map((abs) => (
+                    <div key={abs.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
+                        <div className="flex justify-between items-start mb-3 border-b border-slate-50 pb-2">
+                             <div className="flex items-center gap-2">
+                                <div className="bg-slate-100 p-1.5 rounded-lg text-slate-500">
+                                    <Calendar size={16}/>
+                                </div>
+                                <span className="font-bold text-slate-800 text-sm">
+                                    {new Date(abs.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                </span>
+                             </div>
+                             <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
+                                abs.type === 'INJUSTIFICADA' ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
+                             }`}>
+                                {abs.type}
+                             </span>
+                        </div>
+
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm border border-slate-200">
+                                <User size={18}/>
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-800 text-sm leading-tight">{abs.employees?.name || '---'}</h3>
+                                <p className="text-xs text-slate-500 font-mono">Mat: {abs.employee_id}</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-2.5 rounded-lg text-xs text-slate-600 mb-2 border border-slate-100">
+                            <span className="font-bold">Motivo:</span> {abs.reason || 'Sem observação'}
+                        </div>
+
+                        <div className="flex justify-end pt-2">
+                            <button 
+                                onClick={() => handleDelete(abs.id)}
+                                className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition"
+                            >
+                                <Trash2 size={14}/> Remover
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* DESKTOP: TABELA */}
+            <div className="hidden md:block">
+                <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                    <th className="px-6 py-4">Data</th>
+                    <th className="px-6 py-4">Funcionário</th>
+                    <th className="px-6 py-4">Tipo</th>
+                    <th className="px-6 py-4">Motivo</th>
+                    <th className="px-6 py-4 text-right">Ações</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {currentData.length === 0 ? (
+                        <tr><td colSpan={5} className="text-center p-8 text-slate-400">Nenhuma falta registrada neste mês.</td></tr>
+                    ) : (
+                        currentData.map((abs) => (
+                        <tr key={abs.id} className="hover:bg-blue-50/30 transition">
+                            <td className="px-6 py-3 font-medium text-slate-800">
+                                {new Date(abs.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className="px-6 py-3">
+                                <div className="font-medium text-slate-900">{abs.employees?.name || '---'}</div>
+                                <div className="text-xs text-slate-400">Mat: {abs.employee_id}</div>
+                            </td>
+                            <td className="px-6 py-3">
+                                <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${
+                                    abs.type === 'INJUSTIFICADA' 
+                                        ? 'bg-red-50 text-red-700 border-red-100' 
+                                        : 'bg-blue-50 text-blue-700 border-blue-100'
+                                }`}>
+                                    {abs.type}
+                                </span>
+                            </td>
+                            <td className="px-6 py-3 text-slate-500">{abs.reason}</td>
+                            <td className="px-6 py-3 text-right">
+                            <button onClick={() => handleDelete(abs.id)} className="text-slate-400 hover:text-red-600 p-2 transition hover:bg-red-50 rounded-lg">
+                                <Trash2 size={16} />
+                            </button>
+                            </td>
+                        </tr>
+                        ))
+                    )}
+                </tbody>
+                </table>
+            </div>
+        </div>
+
+        {/* Paginação */}
+        {totalItems > 0 && (
+            <div className="bg-white p-3 md:p-4 border-t border-slate-200 flex items-center justify-between shrink-0 sticky bottom-0 z-20 shadow-inner">
+                <span className="text-xs md:text-sm text-slate-500">
+                     <span className="hidden sm:inline">Mostrando</span> <b>{startIndex + 1}-{Math.min(endIndex, totalItems)}</b> <span className="hidden sm:inline">de <b>{totalItems}</b></span>
+                </span>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50 transition">
+                        <ChevronLeft size={16}/>
                     </button>
-                    </td>
-                </tr>
-                ))
-            )}
-          </tbody>
-        </table>
+                    <span className="text-sm font-medium px-2 text-slate-700">{currentPage}/{totalPages}</span>
+                    <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50 transition">
+                        <ChevronRight size={16}/>
+                    </button>
+                </div>
+            </div>
+        )}
       </div>
 
-      {/* --- MODAL DE LANÇAMENTO (COM PERÍODO) --- */}
+      {/* --- MODAL DE LANÇAMENTO (ATUALIZADO) --- */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <div className="flex justify-between items-center p-4 border-b bg-slate-50">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         <CalendarDays size={18} className="text-blue-600"/> Lançar Falta / Período
@@ -311,7 +384,7 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
                                 className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50"
                                 value={manualForm.endDate}
                                 onChange={e => setManualForm({...manualForm, endDate: e.target.value})}
-                                min={manualForm.startDate} // Bloqueia datas anteriores
+                                min={manualForm.startDate}
                             />
                         </div>
                     </div>
@@ -354,7 +427,7 @@ export default function AbsencesClient({ initialAbsences }: { initialAbsences: a
                             disabled={loading}
                             className="flex-1 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition text-sm font-medium flex justify-center items-center gap-2"
                         >
-                            {loading ? 'Salvando...' : <><Save size={16}/> Salvar Lançamento</>}
+                            {loading ? 'Salvando...' : <><Save size={16}/> Salvar</>}
                         </button>
                     </div>
                 </form>
