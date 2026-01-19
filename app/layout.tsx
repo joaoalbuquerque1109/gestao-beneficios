@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner"; // Componente de notificações
+import { Suspense } from "react";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -41,8 +43,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} h-full bg-slate-50 text-slate-900`}
       >
-        {/* Renderiza a aplicação */}
-        {children}
+        {/* Renderiza a aplicação com loading durante transições */}
+        <Suspense fallback={<LoadingSpinner fullScreen />}>
+          {children}
+        </Suspense>
 
         {/* Componente Global de Notificações 
           Agora você pode chamar toast.success('...') em qualquer lugar
