@@ -334,7 +334,8 @@ export default function EmployeeClient({ initialEmployees, departments, location
                             </div>
                             <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
                                 emp.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 
-                                emp.status === 'INATIVO' ? 'bg-slate-100 text-slate-500' : 'bg-orange-100 text-orange-700'
+                                emp.status === 'INATIVO' ? 'bg-slate-100 text-slate-500' :
+                                emp.status === 'AVISO PREVIO TRABALHADO' ? 'bg-slate-100 text-purple-400' : 'bg-orange-100 text-orange-700'
                             }`}>
                                 {emp.status}
                             </span>
@@ -559,6 +560,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                         <option value="FERIAS">FERIAS</option>
                         <option value="MATERNIDADE">MATERNIDADE</option>
                         <option value="DEMITIDO">DEMITIDO</option>
+                        <option value="AVISO PREVIO TRABALHADO">AVISO PRÉVIO TRABALHADO</option>
                     </select>
                 </div>
 

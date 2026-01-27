@@ -1,17 +1,26 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, DollarSign, Scale, Save, Search, Check, X } from 'lucide-react'
-import { createAdjustment, deleteAdjustment } from '@/app/actions/adjustments'
-import { getActiveEmployees } from '@/app/actions/absences' // Reutilizando a busca de funcionários
+import { Plus, Trash2, DollarSign, Scale, Save, Search, Check, X, FileDown, Upload, Pencil, Loader2 } from 'lucide-react'
+import { createAdjustment, deleteAdjustment, importAdjustmentsBatch, updateAdjustment } from '@/app/actions/adjustments'
+import { getActiveEmployees } from '@/app/actions/absences'
+import * as XLSX from 'xlsx'
 
 export default function AdjustmentsClient({ initialAdjustments }: any) {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7))
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
   
-  // --- AUTOCOMPLETE ESTADOS ---
+  // Estados de Loading
+  const [loading, setLoading] = useState(false)
+  const [loadingMessage, setLoadingMessage] = useState('')
+
+  // Estados de Edição
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  // --- AUTOCOMPLETE ---
   const [employeesList, setEmployeesList] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
@@ -21,7 +30,7 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
     employeeId: '', type: 'CREDITO', value: '', reason: ''
   })
 
-  // Carrega lista de funcionários apenas uma vez
+  // Carrega funcionários (apenas uma vez)
   useEffect(() => {
     getActiveEmployees().then(setEmployeesList)
   }, [])
@@ -37,14 +46,16 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // Filtra visualmente pelo mês selecionado
+  // Filtra dados da tabela pelo mês
   const filtered = initialAdjustments.filter((a: any) => a.period_id === period)
 
-  // Filtra lista do autocomplete
+  // Filtra autocomplete
   const filteredEmployees = employeesList.filter(emp => 
     emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     emp.id.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  // --- AÇÕES DO FORMULÁRIO ---
 
   const handleSelectEmployee = (emp: any) => {
     setFormData({ ...formData, employeeId: emp.id })
@@ -52,56 +63,170 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
     setIsDropdownOpen(false)
   }
 
+  const handleOpenNew = () => {
+    setEditingId(null)
+    setFormData({ employeeId: '', type: 'CREDITO', value: '', reason: '' })
+    setSearchTerm('')
+    setIsModalOpen(true)
+  }
+
+  const handleOpenEdit = (adj: any) => {
+    setEditingId(adj.id)
+    setFormData({
+        employeeId: adj.employee_id,
+        type: adj.type,
+        value: adj.value,
+        reason: adj.reason
+    })
+    // Preenche o nome no campo de busca para aparecer visualmente
+    setSearchTerm(adj.employees?.name || '')
+    setIsModalOpen(true)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if(!formData.employeeId) return alert("Selecione um funcionário.")
     
     setLoading(true)
-    await createAdjustment({ ...formData, periodId: period })
-    setLoading(false)
-    
-    setIsModalOpen(false)
-    setFormData({ employeeId: '', type: 'CREDITO', value: '', reason: '' })
-    setSearchTerm('')
-    window.location.reload()
+    setLoadingMessage('Salvando...')
+
+    try {
+        if (editingId) {
+            // Modo Edição
+            await updateAdjustment(editingId, { ...formData })
+        } else {
+            // Modo Criação
+            await createAdjustment({ ...formData, periodId: period })
+        }
+        
+        setIsModalOpen(false)
+        window.location.reload()
+    } catch (error) {
+        alert('Erro ao salvar.')
+    } finally {
+        setLoading(false)
+        setLoadingMessage('')
+    }
   }
 
   const handleDelete = async (id: string) => {
-    if(confirm('Excluir ajuste?')) {
+    if(confirm('Tem certeza que deseja excluir este ajuste?')) {
+        setLoading(true)
+        setLoadingMessage('Excluindo...')
         await deleteAdjustment(id)
         window.location.reload()
     }
   }
 
-  const formatCurrency = (val: number | string) => {
-      const num = Number(val)
-      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num)
+  // --- FUNÇÕES DE IMPORTAÇÃO (EXCEL) ---
+
+  const handleDownloadTemplate = () => {
+    const template = [
+      { 'Matrícula': '12345', 'Tipo (C ou D)': 'C', 'Valor': 150.00, 'Motivo': 'Bônus Meta' },
+      { 'Matrícula': '67890', 'Tipo (C ou D)': 'D', 'Valor': 50.00, 'Motivo': 'Avaria Equipamento' }
+    ]
+    const ws = XLSX.utils.json_to_sheet(template)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Modelo")
+    XLSX.writeFile(wb, "Modelo_Ajustes.xlsx")
   }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return
+    const file = e.target.files[0]
+    e.target.value = '' 
+
+    if (!confirm(`Importar ajustes para o período: ${period}?`)) return
+
+    setLoading(true)
+    setLoadingMessage('Lendo arquivo...')
+    
+    try {
+      const data = await file.arrayBuffer()
+      const workbook = XLSX.read(data)
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet)
+
+      setLoadingMessage(`Processando ${jsonData.length} linhas...`)
+
+      const parsedAdjustments = jsonData.map((row: any) => {
+        let tipoRaw = String(row['Tipo (C ou D)'] || row['Tipo'] || 'D').toUpperCase()
+        let tipoFinal = (tipoRaw.startsWith('C') || tipoRaw.includes('CREDITO')) ? 'CREDITO' : 'DEBITO'
+
+        return {
+            employee_id: String(row['Matrícula'] || row['Matricula'] || ''),
+            period_id: period,
+            type: tipoFinal,
+            value: Number(row['Valor'] || 0),
+            reason: row['Motivo'] || 'Importação Excel'
+        }
+      }).filter(item => item.employee_id && item.value > 0)
+
+      if (parsedAdjustments.length === 0) {
+        alert("Nenhum dado válido encontrado.")
+        setLoading(false)
+        return
+      }
+
+      const res = await importAdjustmentsBatch(parsedAdjustments)
+      if (res.error) alert('Erro: ' + res.error)
+      else {
+        alert(`Sucesso! ${res.count} importados.`)
+        window.location.reload()
+      }
+    } catch (err: any) {
+      alert('Erro crítico: ' + err.message)
+    } finally {
+      setLoading(false)
+      setLoadingMessage('')
+    }
+  }
+
+  const formatCurrency = (val: number | string) => 
+      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val))
 
   return (
     <div className="space-y-4 md:space-y-6 flex flex-col md:h-[calc(100vh-6rem)]">
       
+      {/* LOADING OVERLAY */}
+      {loading && (
+        <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center z-50 text-white backdrop-blur-sm">
+            <Loader2 size={48} className="animate-spin mb-4" />
+            <p className="text-xl font-bold">{loadingMessage || 'Processando...'}</p>
+        </div>
+      )}
+
       {/* HEADER */}
-      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 shrink-0">
+      <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 shrink-0">
         <div>
             <h2 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
                 <Scale className="text-blue-600"/> Ajustes Financeiros
             </h2>
             <p className="text-sm text-slate-500">Lançamentos manuais (Créditos/Débitos)</p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
+        
+        <div className="flex flex-col md:flex-row gap-2 w-full xl:w-auto">
             <input 
                 type="month" 
                 value={period} 
                 onChange={e => setPeriod(e.target.value)} 
-                className="border p-2 rounded-lg bg-white flex-1 md:flex-none"
+                className="border p-2 rounded-lg bg-white w-full md:w-auto shadow-sm"
             />
-            <button 
-                onClick={() => setIsModalOpen(true)} 
-                className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-800 shadow-sm font-bold text-sm flex-1 md:flex-none"
-            >
-                <Plus size={18}/> Novo
-            </button>
+            
+            <div className="grid grid-cols-2 md:flex gap-2">
+                <button onClick={handleDownloadTemplate} className="flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-50 transition text-sm font-medium">
+                    <FileDown size={18} /> <span className="hidden md:inline">Modelo</span>
+                </button>
+                
+                <label className="flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg cursor-pointer hover:bg-blue-700 transition text-sm font-medium shadow-sm">
+                    <Upload size={18} /> Importar
+                    <input type="file" className="hidden" accept=".xlsx" onChange={handleImport} disabled={loading} />
+                </label>
+
+                <button onClick={handleOpenNew} className="col-span-2 md:col-span-1 bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-800 shadow-sm font-bold text-sm">
+                    <Plus size={18}/> Novo
+                </button>
+            </div>
         </div>
       </div>
 
@@ -119,7 +244,7 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
         <div className="md:overflow-auto flex-1 relative p-0 md:p-0">
             
             {/* --- MOBILE: CARDS --- */}
-            <div className="md:hidden space-y-3 pb-20">
+            <div className="md:hidden space-y-3 pb-20 p-2">
                 {filtered.length === 0 ? (
                     <div className="text-center p-8 text-slate-400 bg-white rounded-xl border border-dashed border-slate-300">
                         Nenhum ajuste neste mês.
@@ -138,9 +263,14 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                                     <p className="text-xs text-slate-500 font-mono">Mat: {adj.employee_id}</p>
                                 </div>
                             </div>
-                            <button onClick={() => handleDelete(adj.id)} className="text-slate-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50">
-                                <Trash2 size={18}/>
-                            </button>
+                            <div className="flex gap-1">
+                                <button onClick={() => handleOpenEdit(adj)} className="text-slate-400 hover:text-blue-500 p-2 rounded-lg hover:bg-blue-50 transition">
+                                    <Pencil size={18}/>
+                                </button>
+                                <button onClick={() => handleDelete(adj.id)} className="text-slate-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition">
+                                    <Trash2 size={18}/>
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
@@ -176,7 +306,7 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                         {filtered.length === 0 ? (
                             <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhum ajuste neste mês.</td></tr>
                         ) : filtered.map((adj: any) => (
-                            <tr key={adj.id} className="hover:bg-slate-50 transition">
+                            <tr key={adj.id} className="hover:bg-slate-50 transition group">
                                 <td className="px-6 py-3 font-medium">{adj.employee_id}</td>
                                 <td className="px-6 py-3 font-medium text-slate-800">{adj.employees?.name}</td>
                                 <td className="px-6 py-3">
@@ -191,9 +321,14 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                                 </td>
                                 <td className="px-6 py-3 text-slate-500">{adj.reason}</td>
                                 <td className="px-6 py-3 text-right">
-                                    <button onClick={() => handleDelete(adj.id)} className="text-slate-400 p-2 hover:text-red-600 hover:bg-red-50 rounded transition">
-                                        <Trash2 size={16}/>
-                                    </button>
+                                    <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => handleOpenEdit(adj)} className="text-slate-500 p-2 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="Editar">
+                                            <Pencil size={16}/>
+                                        </button>
+                                        <button onClick={() => handleDelete(adj.id)} className="text-slate-500 p-2 hover:text-red-600 hover:bg-red-50 rounded transition" title="Excluir">
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -207,7 +342,9 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className="bg-white p-6 rounded-xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-bold text-lg text-slate-800">Novo Lançamento</h3>
+                    <h3 className="font-bold text-lg text-slate-800">
+                        {editingId ? 'Editar Lançamento' : 'Novo Lançamento'}
+                    </h3>
                     <button onClick={() => setIsModalOpen(false)}><X className="text-slate-400 hover:text-slate-600"/></button>
                 </div>
                 
@@ -302,7 +439,7 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                             disabled={loading}
                             className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 shadow-lg text-sm transition flex items-center gap-2"
                         >
-                            {loading ? 'Salvando...' : <><Save size={16}/> Salvar Ajuste</>}
+                            {loading ? 'Salvando...' : <><Save size={16}/> {editingId ? 'Atualizar' : 'Salvar'}</>}
                         </button>
                     </div>
                 </form>
