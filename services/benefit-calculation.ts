@@ -28,6 +28,20 @@ export const calculateBenefit = (params: CalcParams) => {
     adjustmentsTotal
   } = params;
   
+  // Se for Aviso Prévio Trabalhado, zera todos os benefícios
+  if (employee.status === 'AVISO PREVIO TRABALHADO' && employee.status === 'AVISO PRÉVIO TRABALHADO') {
+    return {
+        daysWorked: 0,
+        vaValue: 0,
+        basketValue: 0,
+        total: 0 + adjustmentsTotal,
+        debug: {
+            message: "Funcionário em Aviso Prévio Trabalhado - Benefícios zerados."
+        }
+    };
+  }
+  // ----------------------------------
+
   // 1. Regra de Admissão Proporcional (Baseada em dias úteis para o VA)
   let effectiveDays = workingDays;
 
