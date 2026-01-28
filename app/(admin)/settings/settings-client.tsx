@@ -17,7 +17,7 @@ export default function SettingsClient({ initialConfig, departments, locations, 
     basketValue: initialConfig.basket_value,
     basketLimit: initialConfig.basket_limit,
     cutoffDay: initialConfig.cutoff_day,
-    businessDays: initialConfig.business_days || 22
+    businessDays: initialConfig.business_days
   })
 
   // Inputs locais

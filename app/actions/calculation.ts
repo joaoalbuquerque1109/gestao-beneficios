@@ -35,19 +35,15 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   const { data: config, error: configError } = await supabase.from('global_config').select('*').single()
   if (configError || !config) return { error: 'Erro crítico: Configurações globais não encontradas.' }
 
-  const DAILY_VALUE_VA = Number(config.daily_value_va) || 15.00
-  const BASKET_VALUE = Number(config.basket_value) || 142.05
-  const BASKET_LIMIT = Number(config.basket_limit) || 1780.00
-  const STANDARD_BUSINESS_DAYS = Number(config.business_days) || 22
+  const DAILY_VALUE_VA = Number(config.daily_value_va)
+  const BASKET_VALUE = Number(config.basket_value)
+  const BASKET_LIMIT = Number(config.basket_limit)
+  const STANDARD_BUSINESS_DAYS = Number(config.business_days)
 
-  // Definição das datas de corte
-  const { start: absencesStart, end: absencesEnd } = getCalculationRange(periodName, config.cutoff_day || 15)
-  const [pYear, pMonth] = periodName.split('-').map(Number)
-  const monthStart = new Date(pYear, pMonth - 1, 1)
-  const monthEnd = new Date(pYear, pMonth, 0)
+  // Definição das datas de corte (Janela Fiscal, ex: 15/12 a 15/01)
+  const { start: absencesStart, end: absencesEnd } = getCalculationRange(periodName, config.cutoff_day)
 
   // 3. Buscar Dados
-  // CORREÇÃO: Busca inclusiva para garantir que quem está afastado/atestado entre na folha para cálculo proporcional
   const { data: employees, error: empError } = await supabase
     .from('employees')
     .select('*')
@@ -70,16 +66,21 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     const manualUnjustified = empAbsences.filter(a => a.type === 'INJUSTIFICADA').length
     const manualJustified = empAbsences.filter(a => a.type === 'JUSTIFICADA').length
 
-    // B. Cálculo de Dias de Férias/Afastamento (Baseado no cadastro)
+    // B. Cálculo de Dias de Férias/Afastamento (Corrigido para usar a Janela de Corte)
     let vacationDays = 0
     if (employee.status_start_date && employee.status_end_date) {
         const statusStart = new Date(employee.status_start_date)
         const statusEnd = new Date(employee.status_end_date)
         
-        // Verifica intersecção com o mês atual
-        const interStart = statusStart > monthStart ? statusStart : monthStart
-        const interEnd = statusEnd < monthEnd ? statusEnd : monthEnd
+        // CORREÇÃO: Usamos a janela de corte (ex: 15/12 a 15/01) como limites
+        const windowStart = new Date(absencesStart)
+        const windowEnd = new Date(absencesEnd)
         
+        // Verifica intersecção com a janela fiscal atual
+        const interStart = statusStart > windowStart ? statusStart : windowStart
+        const interEnd = statusEnd < windowEnd ? statusEnd : windowEnd
+        
+        // Se houver sobreposição válida (Start <= End), calculamos os dias úteis dessa sobreposição
         if (interStart <= interEnd) {
             vacationDays = getBusinessDaysBetween(interStart, interEnd)
         }
@@ -96,8 +97,8 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     const calculation = calculateBenefit({
       employee,
       unjustifiedAbsences: manualUnjustified,
-      justifiedAbsences: manualJustified, // Atestados Manuais (Regra > 5 dias)
-      vacationDays: vacationDays,         // Férias/Afastamentos (Sempre desconta)
+      justifiedAbsences: manualJustified, 
+      vacationDays: vacationDays,         // Agora contém apenas dias dentro da janela (15 a 15)
       workingDays: STANDARD_BUSINESS_DAYS,
       dailyValueVA: DAILY_VALUE_VA,
       basketValue: BASKET_VALUE,
@@ -119,7 +120,7 @@ export async function processPeriod(periodInput: string, userEmail: string) {
       calculation_details: { 
           ...calculation.debug, 
           vacationDaysCalculated: vacationDays,
-          vacationRangeUsed: { start: monthStart, end: monthEnd },
+          vacationRangeUsed: { start: absencesStart, end: absencesEnd }, // Atualizado para refletir a janela usada
           adjustmentsTotal 
       }
     }
@@ -148,7 +149,7 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   return { success: true, count: resultsToInsert.length, total: totalValue }
 }
 
-// --- FUNÇÕES AUXILIARES DE LEITURA ---
+// --- FUNÇÕES AUXILIARES DE LEITURA (Mantidas iguais) ---
 
 export async function getPeriodDataForExport(periodName: string) {
   const supabase = await createClient()

@@ -18,8 +18,9 @@ export default function AdminLayoutWrapper({ children }: { children: React.React
       {/* Área Principal */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
-        {/* --- CABEÇALHO MOBILE (Oculto no Desktop via md:hidden) --- */}
-        <header className="md:hidden h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 shadow-sm z-10">
+        {/* --- CABEÇALHO MOBILE/TABLET --- */}
+        {/* CORREÇÃO AQUI: Mudado de md:hidden para lg:hidden */}
+        <header className="lg:hidden h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 shadow-sm z-10">
             <div className="flex items-center gap-3">
                 {/* Botão Hamburguer */}
                 <button 
@@ -31,7 +32,7 @@ export default function AdminLayoutWrapper({ children }: { children: React.React
                 <span className="font-semibold text-slate-700">Menu</span>
             </div>
 
-            {/* Ações Mobile (Sair / Avatar) */}
+            {/* Ações Mobile (Logo/Avatar) */}
             <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs border border-blue-200">
                     <Image 
