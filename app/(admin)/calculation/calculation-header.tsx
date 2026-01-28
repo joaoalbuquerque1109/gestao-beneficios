@@ -38,6 +38,7 @@ export function CalculationHeader({
 
   const isDownloadAllowed = ['APROVADO', 'CLOSED'].includes(periodStatus)
   const isProcessed = periodStatus === 'PROCESSADO'
+  const isExported = periodStatus === 'EXPORTADO'
   const canManage = ['ADMIN', 'RH'].includes(userRole)
 
   return (
@@ -53,7 +54,12 @@ export function CalculationHeader({
             <span className="flex items-center gap-1 text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded-full border border-green-200">
               <CheckCircle size={12} /> APROVADO PARA PAGAMENTO
             </span>
-          ) : isProcessed ? (
+          ): isExported ? (
+            <span className="flex items-center gap-1 text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded-full border border-purple-200">
+              <Lock size={12} /> FOLHA EXPORTADA
+            </span>
+          )
+           : isProcessed ? (
             <span className="flex items-center gap-1 text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-full border border-blue-200">
               <Clock size={12} /> AGUARDANDO APROVAÇÃO
             </span>
