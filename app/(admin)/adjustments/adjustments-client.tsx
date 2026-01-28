@@ -4,7 +4,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, DollarSign, Scale, Save, Search, Check, X, FileDown, Upload, Pencil, Loader2 } from 'lucide-react'
+import { 
+  Plus, Trash2, DollarSign, Scale, Save, Search, Check, X, FileDown, Upload, 
+  Pencil, Loader2, ChevronLeft, ChevronRight 
+} from 'lucide-react'
 import { createAdjustment, deleteAdjustment, importAdjustmentsBatch, updateAdjustment } from '@/app/actions/adjustments'
 import { getActiveEmployees } from '@/app/actions/absences'
 import * as XLSX from 'xlsx'
@@ -13,6 +16,11 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7))
   const [isModalOpen, setIsModalOpen] = useState(false)
   
+  // Estados de Busca e Paginação
+  const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 20
+
   // Estados de Loading
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
@@ -35,6 +43,11 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
     getActiveEmployees().then(setEmployeesList)
   }, [])
 
+  // Reseta a paginação ao mudar filtros
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, period])
+
   // Fecha dropdown ao clicar fora
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -46,10 +59,26 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // Filtra dados da tabela pelo mês
-  const filtered = initialAdjustments.filter((a: any) => a.period_id === period)
+  // --- LÓGICA DE FILTRO E PAGINAÇÃO ---
 
-  // Filtra autocomplete
+  const filtered = initialAdjustments.filter((a: any) => {
+    const matchesPeriod = a.period_id === period
+    const lowerSearch = search.toLowerCase()
+    const matchesSearch = search === '' || 
+        (a.employees?.name?.toLowerCase().includes(lowerSearch) || 
+         String(a.employee_id).includes(lowerSearch) ||
+         a.reason?.toLowerCase().includes(lowerSearch))
+    
+    return matchesPeriod && matchesSearch
+  })
+
+  const totalItems = filtered.length
+  const totalPages = Math.ceil(totalItems / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const currentData = filtered.slice(startIndex, endIndex)
+
+  // Filtra autocomplete do modal
   const filteredEmployees = employeesList.filter(emp => 
     emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     emp.id.toLowerCase().includes(searchTerm.toLowerCase())
@@ -186,7 +215,7 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
       new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val))
 
   return (
-    <div className="space-y-4 md:space-y-6 flex flex-col md:h-[calc(100vh-6rem)]">
+    <div className="space-y-4 md:space-y-6 flex flex-col h-[calc(100dvh-3rem)]">
       
       {/* LOADING OVERLAY */}
       {loading && (
@@ -230,26 +259,40 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
         </div>
       </div>
 
+      {/* --- BARRA DE BUSCA (NOVO) --- */}
+      <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 shrink-0">
+        <div className="relative w-full md:max-w-md">
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={20} />
+          <input
+            type="text"
+            placeholder="Buscar por nome, matrícula ou motivo..."
+            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-colors"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
       {/* ÁREA DE DADOS */}
-      <div className="bg-slate-50 md:bg-white md:rounded-xl md:shadow-sm md:border md:border-slate-200 flex flex-col flex-1 min-h-0 md:overflow-hidden">
+      <div className="bg-slate-50 md:bg-white md:rounded-xl md:shadow-sm md:border md:border-slate-200 flex flex-col flex-1 min-h-0 overflow-hidden">
         
         {/* Header Tabela (Desktop) */}
         <div className="hidden md:flex p-4 border-b border-slate-100 justify-between items-center bg-white shrink-0">
             <span className="font-semibold text-slate-700">Lançamentos no Período</span>
             <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 font-bold">
-                {filtered.length} Registros
+                {totalItems} Registros
             </span>
         </div>
 
-        <div className="md:overflow-auto flex-1 relative p-0 md:p-0">
+        <div className="overflow-auto flex-1 relative p-2 md:p-0">
             
             {/* --- MOBILE: CARDS --- */}
-            <div className="md:hidden space-y-3 pb-20 p-2">
-                {filtered.length === 0 ? (
+            <div className="md:hidden space-y-3 pb-20">
+                {currentData.length === 0 ? (
                     <div className="text-center p-8 text-slate-400 bg-white rounded-xl border border-dashed border-slate-300">
-                        Nenhum ajuste neste mês.
+                        Nenhum ajuste encontrado.
                     </div>
-                ) : filtered.map((adj: any) => (
+                ) : currentData.map((adj: any) => (
                     <div key={adj.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
@@ -303,9 +346,9 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {filtered.length === 0 ? (
-                            <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhum ajuste neste mês.</td></tr>
-                        ) : filtered.map((adj: any) => (
+                        {currentData.length === 0 ? (
+                            <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhum ajuste encontrado.</td></tr>
+                        ) : currentData.map((adj: any) => (
                             <tr key={adj.id} className="hover:bg-slate-50 transition group">
                                 <td className="px-6 py-3 font-medium">{adj.employee_id}</td>
                                 <td className="px-6 py-3 font-medium text-slate-800">{adj.employees?.name}</td>
@@ -336,6 +379,24 @@ export default function AdjustmentsClient({ initialAdjustments }: any) {
                 </table>
             </div>
         </div>
+
+        {/* --- PAGINAÇÃO (NOVO) --- */}
+        {totalItems > 0 && (
+            <div className="bg-white p-3 md:p-4 border-t border-slate-200 flex items-center justify-between shrink-0 sticky bottom-0 z-20 shadow-inner">
+                <span className="text-xs md:text-sm text-slate-500">
+                     <span className="hidden sm:inline">Mostrando</span> <b>{startIndex + 1}-{Math.min(endIndex, totalItems)}</b> <span className="hidden sm:inline">de <b>{totalItems}</b></span>
+                </span>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50 transition">
+                        <ChevronLeft size={16}/>
+                    </button>
+                    <span className="text-sm font-medium px-2 text-slate-700">{currentPage}/{totalPages}</span>
+                    <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50 transition">
+                        <ChevronRight size={16}/>
+                    </button>
+                </div>
+            </div>
+        )}
       </div>
 
       {isModalOpen && (
