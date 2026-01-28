@@ -3,11 +3,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { saveEmployee, deleteEmployee, importEmployeesBatch } from '@/app/actions/employees'
+import { saveEmployee, deleteEmployee, importEmployeesBatch, updateStatusBatch } from '@/app/actions/employees'
 import { 
   Plus, Search, Trash2, Pencil, Upload, Download, FileDown, X, UserPlus, Loader2,
   ChevronLeft, ChevronRight, CalendarClock, AlertTriangle, ShoppingBasket, CheckCircle, XCircle,
-  Building2, MapPin, Briefcase, DollarSign
+  Building2, MapPin, Briefcase, DollarSign, Users
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { differenceInBusinessDays, parseISO, isValid } from 'date-fns'
@@ -16,6 +16,11 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const [employees, setEmployees] = useState(initialEmployees)
   const [search, setSearch] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
+  
+  // Estados para Atualização em Massa
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false)
+  const [bulkType, setBulkType] = useState<'DEMISSAO' | 'FERIAS'>('FERIAS')
+  
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   
@@ -41,7 +46,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
 
   useEffect(() => { setCurrentPage(1) }, [search, showBasketOnly])
 
-  // ... (Funções auxiliares mantidas: calculateImpact, excelDateToISO, etc.)
   const calculateImpact = () => {
     if (!STATUS_TEMPORARIOS.includes(formData.status) || !formData.statusStartDate || !formData.statusEndDate) return null
     const start = parseISO(formData.statusStartDate)
@@ -74,7 +78,121 @@ export default function EmployeeClient({ initialEmployees, departments, location
     return null
   }
 
+  // Lógica para encontrar funcionário (usada na atualização em massa)
+  const findEmployee = (row: any) => {
+      // 1. Tenta por Matrícula
+      if (row['Matrícula'] || row['Matricula']) {
+          const id = String(row['Matrícula'] || row['Matricula']).trim()
+          const found = employees.find((e: any) => e.id === id)
+          if (found) return found
+      }
+      // 2. Tenta por CPF
+      if (row['CPF']) {
+          const cpf = String(row['CPF']).replace(/\D/g, '')
+          const found = employees.find((e: any) => e.cpf === cpf)
+          if (found) return found
+      }
+      // 3. Tenta por Nome (Match exato em maiúsculo)
+      if (row['Nome'] || row['Nome Completo']) {
+          const name = String(row['Nome'] || row['Nome Completo']).toUpperCase().trim()
+          const found = employees.find((e: any) => e.name === name)
+          if (found) return found
+      }
+      return null
+  }
+
+  const handleBulkUpdate = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return
+    const file = e.target.files[0]
+    e.target.value = '' 
+    setLoading(true)
+    setLoadingMessage('Analisando arquivo...')
+
+    try {
+        const data = await file.arrayBuffer()
+        const workbook = XLSX.read(data)
+        const sheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[sheetName]
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet)
+
+        if (jsonData.length === 0) {
+            alert('Arquivo vazio.')
+            setLoading(false)
+            return
+        }
+
+        const updates: any[] = []
+        let notFoundCount = 0
+
+        jsonData.forEach((row) => {
+            const emp = findEmployee(row)
+            if (emp) {
+                // Monta o objeto de atualização
+                const updateObj: any = {
+                    id: emp.id,
+                    name: emp.name,
+                    status: bulkType === 'DEMISSAO' ? 'DEMITIDO' : 'FERIAS'
+                }
+
+                if (bulkType === 'FERIAS') {
+                    // Tenta ler datas de início e fim
+                    const start = excelDateToISO(row['Inicio'] || row['Início'] || row['Data Inicio'] || row['Start'])
+                    const end = excelDateToISO(row['Fim'] || row['Data Fim'] || row['End'])
+                    
+                    if (start && end) {
+                        updateObj.status_start_date = start
+                        updateObj.status_end_date = end
+                    } else {
+                        // Se não tiver datas, ignoramos ou definimos só o status? 
+                        // Melhor não alterar se faltar data para Férias.
+                        return 
+                    }
+                } else if (bulkType === 'DEMISSAO') {
+                    // Demissão limpa as datas de eventos futuros/passados ou mantemos?
+                    // Geralmente demissão é definitiva, então limpamos datas de evento
+                    updateObj.status_start_date = null
+                    updateObj.status_end_date = null
+                }
+
+                updates.push(updateObj)
+            } else {
+                notFoundCount++
+            }
+        })
+
+        if (updates.length === 0) {
+            alert('Nenhum funcionário encontrado ou dados inválidos (datas) na planilha.')
+            setLoading(false)
+            return
+        }
+
+        const confirmMsg = `Serão atualizados ${updates.length} funcionários para status "${bulkType === 'DEMISSAO' ? 'DEMITIDO' : 'FÉRIAS'}".\n` +
+                           (notFoundCount > 0 ? `\n⚠️ ${notFoundCount} linhas não foram encontradas (Nome/CPF não bateram).\n` : '') +
+                           `\nDeseja continuar?`
+
+        if (confirm(confirmMsg)) {
+            setLoadingMessage(`Atualizando ${updates.length} registros...`)
+            const res = await updateStatusBatch(updates, user.email || 'Admin')
+            if (res.errors && res.errors.length > 0) {
+                alert(`Concluído com ${res.count} sucessos e ${res.errors.length} erros.\nVerifique o console para detalhes.`)
+                console.error(res.errors)
+            } else {
+                alert('Atualização em massa concluída com sucesso!')
+            }
+            window.location.reload()
+        }
+
+    } catch (err: any) {
+        console.error(err)
+        alert('Erro ao processar: ' + err.message)
+    } finally {
+        setLoading(false)
+        setIsBulkModalOpen(false)
+    }
+  }
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (Código de Importação existente mantido igual) ...
     if (!e.target.files?.[0]) return
     const file = e.target.files[0]
     e.target.value = '' 
@@ -221,14 +339,8 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val)
 
-  // Função para gerar as iniciais
   const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase()
+    return name.split(' ').map(word => word[0]).slice(0, 2).join('').toUpperCase()
   }
 
   return (
@@ -252,14 +364,14 @@ export default function EmployeeClient({ initialEmployees, departments, location
             <button onClick={handleOpenNew} className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition text-sm font-bold shadow-sm">
                 <Plus size={18} /> Novo
             </button>
-            <button onClick={handleDownloadTemplate} className="flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition text-sm font-medium">
-                <FileDown size={18} /> Modelo
+            <button onClick={() => setIsBulkModalOpen(true)} className="flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition text-sm font-medium shadow-sm">
+                <Users size={18} /> Atualizar Status
             </button>
             <label className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 transition text-sm font-medium shadow-sm">
-                <Upload size={18} /> Importar
+                <Upload size={18} /> Importar (Geral)
                 <input type="file" className="hidden" accept=".xlsx" onChange={handleImport} disabled={loading} />
             </label>
-            <button onClick={handleExport} className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition text-sm font-medium">
+             <button onClick={handleExport} className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition text-sm font-medium">
                 <Download size={18} /> Exportar
             </button>
         </div>
@@ -299,10 +411,9 @@ export default function EmployeeClient({ initialEmployees, departments, location
         </button>
       </div>
 
-      {/* --- ÁREA DE CONTEÚDO (CARD no Mobile / TABLE no Desktop) --- */}
+      {/* --- ÁREA DE CONTEÚDO (TABELA/CARDS) --- */}
       <div className="bg-slate-50 md:bg-white md:rounded-xl md:shadow-sm md:border md:border-slate-200 flex flex-col flex-1 min-h-0 overflow-hidden">
         
-        {/* Header da Lista (Só aparece no Desktop) */}
         <div className="hidden md:flex p-4 border-b border-slate-100 justify-between items-center bg-white shrink-0">
             <span className="font-semibold text-slate-700">Listagem</span>
             <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 font-bold">
@@ -310,10 +421,8 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </span>
         </div>
 
-        {/* Scroll Area */}
         <div className="overflow-auto flex-1 relative p-2 md:p-0">
-            
-            {/* --- VISÃO MOBILE (CARDS) --- */}
+            {/* --- VISÃO MOBILE --- */}
             <div className="md:hidden space-y-3 pb-20"> 
                 {currentData.length === 0 ? (
                      <div className="text-center p-8 text-slate-400 bg-white rounded-lg border border-dashed border-slate-300">
@@ -321,7 +430,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     </div>
                 ) : currentData.map((emp: any) => (
                     <div key={emp.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
-                        {/* Cabeçalho do Card */}
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">
@@ -340,8 +448,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
                                 {emp.status}
                             </span>
                         </div>
-
-                        {/* Corpo do Card */}
                         <div className="grid grid-cols-2 gap-y-2 text-xs text-slate-600 mb-3 bg-slate-50 p-3 rounded-lg">
                             <div className="flex flex-col">
                                 <span className="text-slate-400 text-[10px] uppercase">Matrícula</span>
@@ -351,15 +457,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                                 <span className="text-slate-400 text-[10px] uppercase">Salário</span>
                                 <span className="font-bold text-slate-700">{formatCurrency(emp.salary)}</span>
                             </div>
-                            <div className="flex flex-col col-span-2">
-                                <span className="text-slate-400 text-[10px] uppercase">Departamento</span>
-                                <span className="font-medium flex items-center gap-1">
-                                    <Building2 size={12}/> {emp.department_id}
-                                </span>
-                            </div>
                         </div>
-
-                        {/* Ações do Card */}
                         <div className="flex justify-between items-center border-t border-slate-100 pt-3 mt-1">
                             <div className="flex gap-2">
                                 {emp.status === 'ATIVO' && emp.salary <= BASKET_LIMIT && (
@@ -381,7 +479,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                 ))}
             </div>
 
-            {/* --- VISÃO DESKTOP (TABELA) --- */}
+            {/* --- VISÃO DESKTOP --- */}
             <div className="hidden md:block">
                 <table className="w-full text-left text-sm text-slate-600">
                     <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 sticky top-0 z-10 shadow-sm">
@@ -397,9 +495,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <tbody className="divide-y divide-slate-100">
                         {currentData.length === 0 ? (
                             <tr>
-                                <td colSpan={6} className="p-8 text-center text-slate-400">
-                                    Nenhum funcionário encontrado.
-                                </td>
+                                <td colSpan={6} className="p-8 text-center text-slate-400">Nenhum funcionário encontrado.</td>
                             </tr>
                         ) : currentData.map((emp: any) => (
                             <tr key={emp.id} className="hover:bg-blue-50/30 transition duration-150 group">
@@ -469,10 +565,9 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     </tbody>
                 </table>
             </div>
-
         </div>
 
-        {/* Rodapé da Paginação */}
+        {/* Rodapé Paginação */}
         {totalItems > 0 && (
             <div className="bg-white p-3 md:p-4 border-t border-slate-200 flex items-center justify-between shrink-0 sticky bottom-0 z-20 shadow-inner">
                 <span className="text-xs md:text-sm text-slate-500">
@@ -491,6 +586,47 @@ export default function EmployeeClient({ initialEmployees, departments, location
         )}
       </div>
 
+      {/* --- MODAL DE ATUALIZAÇÃO EM MASSA (NOVO) --- */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                <div className="bg-purple-50 px-6 py-4 border-b border-purple-100 flex justify-between items-center">
+                    <h3 className="font-bold text-purple-900 flex items-center gap-2">
+                        <Users size={20}/> Atualização de Status em Massa
+                    </h3>
+                    <button onClick={() => setIsBulkModalOpen(false)}><X size={24} className="text-slate-400 hover:text-red-500 transition"/></button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-1">Tipo de Ação</label>
+                        <select 
+                            className="w-full border p-2 rounded-lg bg-white"
+                            value={bulkType} 
+                            onChange={(e) => setBulkType(e.target.value as any)}
+                        >
+                            <option value="FERIAS">Registrar Férias</option>
+                            <option value="DEMISSAO">Registrar Demissão</option>
+                        </select>
+                        <p className="text-xs text-slate-500 mt-1">
+                            {bulkType === 'FERIAS' 
+                                ? 'A planilha deve conter colunas: "Inicio" e "Fim" (dd/mm/aaaa), além da identificação (Matrícula, CPF ou Nome).' 
+                                : 'A planilha deve conter Nome e CPF (ou Matrícula) dos funcionários a serem demitidos.'
+                            }
+                        </p>
+                    </div>
+
+                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50 hover:bg-white hover:border-purple-400 transition cursor-pointer relative">
+                         <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".xlsx" onChange={handleBulkUpdate} disabled={loading} />
+                         <Upload size={32} className="mx-auto text-slate-400 mb-2"/>
+                         <p className="font-medium text-slate-600">Clique para enviar a planilha (.xlsx)</p>
+                         <p className="text-xs text-slate-400 mt-1">O sistema tentará identificar automaticamente por Matrícula, depois CPF, depois Nome.</p>
+                    </div>
+                </div>
+             </div>
+        </div>
+      )}
+
+      {/* --- MODAL NOVO/EDITAR --- */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
@@ -502,7 +638,6 @@ export default function EmployeeClient({ initialEmployees, departments, location
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* --- MANTIDO O MESMO FORMULÁRIO DE ANTES, APENAS COM MELHORIAS DE ESPAÇAMENTO --- */}
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Matrícula</label>
                     <input required disabled={isEditMode} className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 outline-none transition" 
@@ -555,6 +690,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                     <select className="w-full border p-2 rounded-lg bg-white font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                         <option value="ATIVO">ATIVO</option>
                         <option value="INATIVO">INATIVO</option>
+                        <option value="MENOR APRENDIZ">MENOR APRENDIZ</option>
                         <option value="AFASTADO INSS">AFASTADO INSS</option>
                         <option value="AFASTADO DOENCA">AFASTADO DOENCA</option>
                         <option value="FERIAS">FERIAS</option>
