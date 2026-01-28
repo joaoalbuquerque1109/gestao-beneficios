@@ -12,16 +12,12 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
 
   const cpfClean = String(data.cpf || '').replace(/\D/g, '')
 
-  // Tratamento de datas vazias (string vazia vira null para o banco)
   const admissionDate = data.admissionDate ? data.admissionDate : null
   const birthDate = data.birthDate ? data.birthDate : null
   
-  // Tratamento das Datas de Status
-  // IMPORTANTE: Mantemos as datas mesmo se o status for ATIVO
   const statusStartDate = data.statusStartDate ? data.statusStartDate : null
   const statusEndDate = data.statusEndDate ? data.statusEndDate : null
 
-  // Prepara o objeto para salvar
   const employeeData: any = {
     id: data.id,
     name: data.name.toUpperCase(),
@@ -33,24 +29,15 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
     admission_date: admissionDate,
     birth_date: birthDate,
     status: data.status,
-    // As datas são salvas independente do status atual
     status_start_date: statusStartDate,
     status_end_date: statusEndDate
   }
 
-  // --- REMOVIDA A REGRA DE LIMPEZA QUE APAGAVA AS DATAS ---
-  // Antes existia um bloco 'if' aqui que forçava as datas para null
-  // se o status fosse ATIVO. Isso foi removido para corrigir o cálculo.
-
   if (isEdit) {
-    // --- EDIÇÃO ---
     const { data: oldEmp } = await supabase.from('employees').select('*').eq('id', data.id).single()
-    
     const { error } = await supabase.from('employees').update(employeeData).eq('id', data.id)
-    
     if (error) return { error: error.message }
 
-    // Log de alteração simples
     if (oldEmp && oldEmp.salary !== employeeData.salary) {
         await supabase.from('movements').insert([{
         employee_id: data.id,
@@ -62,11 +49,8 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
         reference_month: currentMonth
         }])
     }
-
   } else {
-    // --- CRIAÇÃO ---
     const { error } = await supabase.from('employees').insert([employeeData])
-    
     if (error) return { error: error.message }
 
     await supabase.from('movements').insert([{
@@ -83,7 +67,7 @@ export async function saveEmployee(data: any, user: string, isEdit: boolean) {
   return { success: true }
 }
 
-// --- IMPORTAÇÃO EM MASSA (EXCEL) ---
+// --- IMPORTAÇÃO EM MASSA (Criação/Substituição Completa) ---
 export async function importEmployeesBatch(employees: any[], user: string) {
   const supabase = await createClient()
   
@@ -101,11 +85,52 @@ export async function importEmployeesBatch(employees: any[], user: string) {
   }))
 
   const { error } = await supabase.from('employees').upsert(records)
-  
   if (error) return { error: error.message }
 
   revalidatePath('/employees')
   return { success: true, count: records.length }
+}
+
+// --- ATUALIZAÇÃO DE STATUS EM MASSA (NOVO) ---
+export async function updateStatusBatch(updates: any[], user: string) {
+    const supabase = await createClient()
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const errors: string[] = []
+    let successCount = 0
+  
+    // Processamento paralelo para melhor performance
+    const promises = updates.map(async (update) => {
+        const { id, name, status, status_start_date, status_end_date } = update
+
+        // Objeto de atualização (apenas campos necessários)
+        const updateData: any = { status }
+        if (status_start_date !== undefined) updateData.status_start_date = status_start_date
+        if (status_end_date !== undefined) updateData.status_end_date = status_end_date
+
+        const { error } = await supabase.from('employees').update(updateData).eq('id', id)
+
+        if (error) {
+            errors.push(`Erro ID ${id}: ${error.message}`)
+        } else {
+            successCount++
+            // Opcional: Registrar movimento se desejar histórico
+            if (status === 'DEMITIDO' || status === 'FERIAS') {
+                 await supabase.from('movements').insert([{
+                    employee_id: id,
+                    employee_name: name,
+                    type: status === 'DEMITIDO' ? 'DEMISSAO_MASSA' : 'FERIAS_MASSA',
+                    new_value: status,
+                    user_name: user,
+                    reference_month: currentMonth
+                 }])
+            }
+        }
+    })
+
+    await Promise.all(promises)
+    
+    revalidatePath('/employees')
+    return { success: true, count: successCount, errors }
 }
 
 // --- EXCLUSÃO ---
