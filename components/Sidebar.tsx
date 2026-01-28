@@ -7,7 +7,7 @@ import { createClient } from '@/utils/supabase/client'
 import { 
   LayoutDashboard, Users, FileSpreadsheet, Calculator, 
   History, LogOut, Settings as SettingsIcon, CheckCircle, Scale, Activity, 
-  Loader2, UserCog, X, Menu, ChevronLeft
+  Loader2, UserCog, X, Menu, ChevronLeft, MoreVertical
 } from 'lucide-react'
 import { useState, useEffect, ComponentType, SVGProps } from 'react'
 
@@ -119,13 +119,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             /* Mobile/Tablet: Largura fixa da gaveta */
             w-72
             
-            /* Desktop: Flutuante Absoluta (para efeito hover sem empurrar layout) */
+            /* Desktop: Flutuante Absoluta */
             lg:absolute lg:top-0 lg:left-0 lg:bottom-0
             ${isVisualExpanded ? 'lg:w-72' : 'lg:w-20'}
         `}>
 
             {/* HEADER */}
-            <div className="h-20 flex items-center px-4 border-b border-slate-800 shrink-0">
+            <div className="h-20 flex items-center px-4 border-b border-slate-800 shrink-0 bg-slate-900">
               
               {/* Botão Hambúrguer (Apenas Desktop LG+) */}
               <button 
@@ -136,11 +136,9 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 <Menu size={24} />
               </button>
 
-              {/* Logo (Lógica Híbrida) */}
+              {/* Logo */}
               <div className={`flex items-center gap-3 overflow-hidden transition-all duration-300 
-                  /* Desktop: Controlado pelo hover/collapse */
                   lg:${isVisualExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0'}
-                  /* Mobile/Tablet: Sempre visível na gaveta */
                   opacity-100 w-auto
               `}>
                 <div className="whitespace-nowrap">
@@ -150,7 +148,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 </div>
               </div>
 
-              {/* Botão Fechar (Visível em Mobile E Tablet < LG) */}
+              {/* Botão Fechar (Visível em Mobile < LG) */}
               <button onClick={onClose} className="lg:hidden ml-auto text-slate-500 hover:text-white">
                 <X size={20} />
               </button>
@@ -182,9 +180,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         
                         <span className={`
                             transition-all duration-300 origin-left ml-4
-                            /* Desktop Logic */
                             lg:${isVisualExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'}
-                            /* Mobile/Tablet Logic: Sempre visível */
                             opacity-100 w-auto
                         `}>
                             {item.label}
@@ -196,28 +192,49 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               </ul>
             </nav>
 
-            {/* FOOTER */}
-            <div className="p-4 border-t border-slate-800 bg-slate-900 shrink-0 overflow-hidden">
+            {/* FOOTER (USER PROFILE) - ATUALIZADO */}
+            <div className="border-t border-slate-800 bg-slate-850 shrink-0 overflow-hidden">
               {!isLoading && role && userEmail && (
                 <div className={`
-                    flex items-center p-2 rounded-xl transition-all 
-                    lg:${isVisualExpanded ? 'hover:bg-slate-800' : 'justify-start'}
+                    flex items-center transition-all duration-300 p-4
+                    ${isVisualExpanded ? 'justify-between' : 'justify-center'}
                 `}>
-                    <div className="w-9 h-9 shrink-0 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-xs font-bold border border-slate-700">
-                      {getInitials(userEmail)}
+                    {/* User Info Group */}
+                    <div className="flex items-center gap-3 min-w-0 overflow-hidden">
+                        
+                        {/* Avatar com Gradiente */}
+                        <div className="w-10 h-10 shrink-0 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-sm font-bold text-white shadow-lg border border-slate-700">
+                            {getInitials(userEmail)}
+                        </div>
+
+                        {/* Textos (Nome e Cargo) */}
+                        <div className={`
+                            flex flex-col min-w-0 transition-all duration-300
+                            lg:${isVisualExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'}
+                            opacity-100 w-auto
+                        `}>
+                            <p className="text-sm font-semibold text-slate-200 truncate leading-tight">
+                                {userEmail.split('@')[0]}
+                            </p>
+                            <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mt-0.5">
+                                {role}
+                            </p>
+                        </div>
                     </div>
 
+                    {/* Botão Logout */}
                     <div className={`
-                        flex-1 min-w-0 ml-3 transition-all duration-300 
-                        /* Desktop Logic */
-                        lg:${isVisualExpanded ? 'opacity-100' : 'opacity-0 w-0 hidden'}
-                        /* Mobile/Tablet Logic */
+                        transition-all duration-300
+                        lg:${isVisualExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'}
                         opacity-100 w-auto
                     `}>
-                      <p className="text-sm font-medium text-slate-200 truncate">{userEmail.split('@')[0]}</p>
-                      <button onClick={handleLogout} className="text-[10px] text-red-400 hover:text-red-300 uppercase font-bold flex items-center gap-1 mt-1">
-                        Sair <LogOut size={12} />
-                      </button>
+                        <button 
+                            onClick={handleLogout} 
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Sair do Sistema"
+                        >
+                            <LogOut size={18} />
+                        </button>
                     </div>
                 </div>
               )}
