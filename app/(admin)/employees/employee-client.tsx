@@ -640,12 +640,12 @@ export default function EmployeeClient({ initialEmployees, departments, location
             <form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Matrícula</label>
-                    <input required disabled={isEditMode} className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 outline-none transition" 
+                    <input required disabled={isEditMode} className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 outline-none transition"  placeholder="Informe a Matricula"
                         value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} />
                 </div>
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Nome Completo</label>
-                    <input required className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase outline-none transition" 
+                    <input required  className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase outline-none transition " placeholder="Digite seu nome"  
                         value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 </div>
                 <div className="col-span-1">
@@ -655,7 +655,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                 </div>
                 <div className="col-span-1">
                     <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Cargo</label>
-                    <input required className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase outline-none transition" 
+                    <input required className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase outline-none transition" placeholder="Informe o cargo"
                         value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} />
                 </div>
                 
