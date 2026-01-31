@@ -77,7 +77,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     { label: 'Apuração Mensal', path: '/calculation', icon: Calculator, allowed: ['USER', 'RH', 'ADMIN'] },
     { label: 'Aprovação', path: '/approval', icon: CheckCircle, allowed: ['RH', 'ADMIN'] },
     { label: 'Auditoria', path: '/audit', icon: History, allowed: ['ADMIN'] },
-    { label: 'Ajustes Financeiros', path: '/adjustments', icon: Scale, allowed: ['ADMIN'] },
+    { label: 'Ajustes Financeiros', path: '/adjustments', icon: Scale, allowed: ['ADMIN', 'RH', 'USER'] },
     { label: 'Configurações', path: '/settings', icon: SettingsIcon, allowed: ['ADMIN'] },
     { label: 'Usuários', path: '/settings/users', icon: UserCog, allowed: ['ADMIN'] },
   ]

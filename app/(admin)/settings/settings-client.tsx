@@ -6,7 +6,7 @@ import {
   Save, Settings as SettingsIcon, Calendar, Building, MapPin, List, 
   Plus, Trash2, Lock, Unlock, AlertTriangle, Database, RefreshCw, FileX, ToggleLeft, ToggleRight 
 } from 'lucide-react'
-import { updateGlobalSettings, manageListItem, togglePeriodStatus, resetSystem } from '@/app/actions/settings'
+import { updateGlobalSettings, manageListItem, togglePeriodStatus, resetSystem, resetAdjustments } from '@/app/actions/settings'
 
 export default function SettingsClient({ initialConfig, departments, locations, statuses, periods, user }: any) {
   const [loading, setLoading] = useState(false)
@@ -53,17 +53,42 @@ export default function SettingsClient({ initialConfig, departments, locations, 
       window.location.reload()
   }
 
-  const handleReset = async (type: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATION') => {
-      const msg = type === 'EMPLOYEES' ? 'ATENÇÃO: Isso apagará TODOS os funcionários e histórico!' :
-                  type === 'ABSENCES' ? 'ATENÇÃO: Isso apagará todas as faltas lançadas!' :
-                  'Isso zerará os cálculos não fechados.'
-      
-      if (confirm(msg + '\n\nDeseja continuar?')) {
-          await resetSystem(type, user.email || 'Admin')
-          alert('Sistema resetado com sucesso.')
-          window.location.reload()
-      }
-  }
+  // 1. Adicione 'adjustments' ao tipo do handleReset se necessário
+const handleReset = async (type: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATION' | 'ADJUSTMENTS') => {
+    // Identifica o período aberto atual para o reset de ajustes
+    const activePeriod = periods.find((p: any) => p.is_open === true)?.name;
+
+    const messages = {
+        EMPLOYEES: 'ATENÇÃO: Isso apagará TODOS os funcionários e histórico!',
+        ABSENCES: 'ATENÇÃO: Isso apagará todas as faltas lançadas!',
+        CALCULATION: 'Isso zerará os cálculos não fechados.',
+        ADJUSTMENTS: `Isso apagará todos os ajustes do período ${activePeriod || 'atual'}!`
+    };
+
+    if (confirm(messages[type] + '\n\nDeseja continuar?')) {
+        setLoading(true);
+        let result;
+
+        if (type === 'ADJUSTMENTS') {
+            if (!activePeriod) {
+                alert("Erro: Nenhum período aberto encontrado para resetar ajustes.");
+                setLoading(false);
+                return;
+            }
+            result = await resetAdjustments(activePeriod, user.email || 'Admin');
+        } else {
+            result = await resetSystem(type, user.email || 'Admin');
+        }
+
+        if (result?.error) {
+            alert(`Ação Bloqueada: ${result.error}`);
+        } else {
+            alert('Sucesso: Os dados foram removidos respeitando as travas de auditoria.');
+            window.location.reload();
+        }
+        setLoading(false);
+    }
+}
 
   return (
     <div className="space-y-6 md:space-y-8 pb-20 md:pb-10">
@@ -260,9 +285,23 @@ export default function SettingsClient({ initialConfig, departments, locations, 
                     <RefreshCw size={14}/> RESETAR
                 </button>
             </div>
+            <div className="bg-white p-4 rounded-xl border border-orange-100 shadow-sm flex flex-col justify-between">
+            <div>
+                    <div className="font-bold text-slate-800 mb-2 flex items-center gap-2 text-sm">
+                        <List size={16}/> Ajustes Financeiros
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">Remove ajustes do período aberto atual.</p>
+                </div>
+                <button 
+                    onClick={() => handleReset('ADJUSTMENTS')} 
+                    disabled={loading}
+                    className="w-full border border-orange-300 text-orange-600 font-bold text-xs py-2.5 rounded-lg hover:bg-orange-50 flex items-center justify-center gap-2 transition disabled:opacity-50"
+                >
+                    <Trash2 size={14}/> {loading ? 'PROCESSANDO...' : 'RESETAR AJUSTES'}
+                </button>
+            </div>
          </div>
       </div>
-
     </div>
   )
 }

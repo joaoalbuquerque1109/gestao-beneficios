@@ -65,7 +65,7 @@ export async function proxy(request: NextRequest) {
 
   // A. Rotas exclusivas de ADMIN
   // Inclui: Auditoria, Configurações, Ajustes, Gestão de Usuários
-  const adminRoutes = ['/audit', '/settings', '/adjustments']
+  const adminRoutes = ['/audit', '/settings']
   const isTryingAdminRoute = adminRoutes.some(route => path.startsWith(route))
 
   if (isTryingAdminRoute && userRole !== 'ADMIN') {
