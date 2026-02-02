@@ -51,6 +51,24 @@ export async function processPeriod(periodInput: string, userEmail: string) {
   
   if (empError) return { error: 'Erro ao buscar funcionários: ' + empError.message }
 
+  // 3.1 Buscar Regras de Status
+  const { data: statusRulesData, error: statusError } = await supabase
+    .from('employee_statuses')
+    .select('name, includes_va_calculation, includes_basket_calculation, exclusion_type, exclusion_percentage')
+  
+  // Criar mapa de status para regras
+  const statusRulesMap = new Map()
+  if (statusRulesData) {
+    statusRulesData.forEach(rule => {
+      statusRulesMap.set(rule.name, {
+        includes_va_calculation: rule.includes_va_calculation,
+        includes_basket_calculation: rule.includes_basket_calculation,
+        exclusion_type: rule.exclusion_type,
+        exclusion_percentage: rule.exclusion_percentage
+      })
+    })
+  }
+
   const { data: absences, error: absError } = await supabase
     .from('absences').select('*').gte('date', absencesStart).lte('date', absencesEnd)
   if (absError) return { error: 'Erro ao buscar ausências: ' + absError.message }
@@ -94,6 +112,7 @@ export async function processPeriod(periodInput: string, userEmail: string) {
     }, 0)
 
     // D. Chamada da Regra de Negócio
+    const statusRules = statusRulesMap.get(employee.status)
     const calculation = calculateBenefit({
       employee,
       unjustifiedAbsences: manualUnjustified,
@@ -104,7 +123,8 @@ export async function processPeriod(periodInput: string, userEmail: string) {
       basketValue: BASKET_VALUE,
       basketLimit: BASKET_LIMIT,
       periodId: periodName,
-      adjustmentsTotal: adjustmentsTotal
+      adjustmentsTotal: adjustmentsTotal,
+      statusRules: statusRules  // NOVO: Passar as regras do status
     })
 
     return {

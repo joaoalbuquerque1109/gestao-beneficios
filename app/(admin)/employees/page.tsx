@@ -34,7 +34,14 @@ export default async function EmployeesPage() {
     .eq('status', 'ATIVO')
     .order('name')
 
-  // 5. Buscar Configurações Globais
+  // 5. Buscar Status de Funcionários (agora com regras)
+  const { data: statuses } = await supabase
+    .from('employee_statuses')
+    .select('*')
+    .eq('status', 'ATIVO')
+    .order('name')
+
+  // 6. Buscar Configurações Globais
   // Necessário para o cálculo do desconto de VA no modal
   const { data: globalConfig } = await supabase
     .from('global_config')
@@ -47,6 +54,7 @@ export default async function EmployeesPage() {
       initialEmployees={employees || []} 
       departments={departments || []}
       locations={locations || []}
+      statuses={statuses || []}
       user={user}
       // Passamos a configuração para o cliente calcular o impacto financeiro
       globalConfig={globalConfig || {}} 

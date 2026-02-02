@@ -4,12 +4,15 @@
 import { useState } from 'react'
 import { 
   Save, Settings as SettingsIcon, Calendar, Building, MapPin, List, 
-  Plus, Trash2, Lock, Unlock, AlertTriangle, Database, RefreshCw, FileX, ToggleLeft, ToggleRight 
+  Plus, Trash2, Lock, Unlock, AlertTriangle, Database, RefreshCw, FileX, ToggleLeft, ToggleRight, Edit, 
 } from 'lucide-react'
-import { updateGlobalSettings, manageListItem, togglePeriodStatus, resetSystem, resetAdjustments } from '@/app/actions/settings'
+import { updateGlobalSettings, manageListItem, togglePeriodStatus, resetSystem, resetAdjustments, saveEmployeeStatus } from '@/app/actions/settings'
+import StatusRulesModal from '@/components/StatusRulesModal'
 
 export default function SettingsClient({ initialConfig, departments, locations, statuses, periods, user }: any) {
   const [loading, setLoading] = useState(false)
+  const [statusModalOpen, setStatusModalOpen] = useState(false)
+  const [selectedStatus, setSelectedStatus] = useState<any>(null)
   
   // Configuração Global
   const [formData, setFormData] = useState({
@@ -46,6 +49,26 @@ export default function SettingsClient({ initialConfig, departments, locations, 
         if (table === 'employee_statuses') setNewStatus('')
     }
     window.location.reload()
+  }
+
+  const handleOpenStatusModal = (status?: any) => {
+    setSelectedStatus(status)
+    setStatusModalOpen(true)
+  }
+
+  const handleSaveStatus = async (data: any) => {
+    setLoading(true)
+    const result = await saveEmployeeStatus(data, !selectedStatus)
+    setLoading(false)
+
+    if (result.error) {
+      alert(`Erro: ${result.error}`)
+    } else {
+      alert('Status salvo com sucesso!')
+      setStatusModalOpen(false)
+      setSelectedStatus(null)
+      window.location.reload()
+    }
   }
 
   const handleTogglePeriod = async (id: string, isOpen: boolean) => {
@@ -230,15 +253,29 @@ const handleReset = async (type: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATION' | 'ADJ
             <List size={18}/> Status de Funcionários
          </h3>
          <div className="flex gap-2 mb-4 max-w-md">
-            <input placeholder="NOVO STATUS" className="flex-1 border p-2 rounded-lg uppercase text-sm outline-none focus:ring-2 focus:ring-slate-500" 
-                value={newStatus} onChange={e => setNewStatus(e.target.value)} />
-            <button onClick={() => handleListAction('employee_statuses', 'ADD', { name: newStatus })} className="bg-slate-600 text-white p-2 rounded-lg hover:bg-slate-700"><Plus/></button>
+            <button onClick={() => handleOpenStatusModal()} className="bg-slate-600 text-white px-4 py-2 rounded-lg hover:bg-slate-700 font-semibold flex items-center gap-2 transition">
+              <Plus size={18}/>
+              Novo Status com Regras
+            </button>
          </div>
          <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border-t border-slate-100 pt-2">
             {statuses.map((s: any) => (
-                <div key={s.id} className="flex justify-between items-center p-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-0 rounded-lg">
-                    <span className="text-sm text-slate-700 font-medium">{s.name}</span>
-                    <div className="flex gap-2">
+                <div key={s.id} className="flex justify-between items-center p-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-0 rounded-lg group">
+                    <div className="flex-1">
+                      <span className="text-sm text-slate-700 font-medium">{s.name}</span>
+                      {s.description && (
+                        <div className="text-xs text-slate-500">{s.description}</div>
+                      )}
+                      {s.exclusion_type && (
+                        <div className="text-xs text-orange-600 font-semibold">
+                          {s.exclusion_type === 'TOTAL' ? '🔴 Exclusão Total' : `🟠 ${s.exclusion_percentage}% Exclusão`}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                        <button onClick={() => handleOpenStatusModal(s)} className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition">
+                          <Edit size={16}/>
+                        </button>
                         <button onClick={() => handleListAction('employee_statuses', 'TOGGLE', { id: s.id, currentStatus: s.status })}
                             className={`p-1.5 rounded transition ${s.status === 'ATIVO' ? 'text-green-600 hover:bg-green-50' : 'text-slate-400 hover:bg-slate-100'}`}>
                             {s.status === 'ATIVO' ? <ToggleRight size={20}/> : <ToggleLeft size={20}/>}
@@ -249,6 +286,18 @@ const handleReset = async (type: 'EMPLOYEES' | 'ABSENCES' | 'CALCULATION' | 'ADJ
             ))}
          </div>
       </div>
+
+      {/* Status Rules Modal */}
+      <StatusRulesModal 
+        isOpen={statusModalOpen}
+        status={selectedStatus}
+        onClose={() => {
+          setStatusModalOpen(false)
+          setSelectedStatus(null)
+        }}
+        onSave={handleSaveStatus}
+        isLoading={loading}
+      />
 
       {/* 6. Ações do Sistema */}
       <div className="bg-orange-50 p-4 md:p-6 rounded-xl border border-orange-200">

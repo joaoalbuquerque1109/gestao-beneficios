@@ -30,7 +30,7 @@ function useOnClickOutside(ref: any, handler: any) {
   }, [ref, handler])
 }
 
-export default function EmployeeClient({ initialEmployees, departments, locations, user, globalConfig }: any) {
+export default function EmployeeClient({ initialEmployees, departments, locations, statuses, user, globalConfig }: any) {
   // --- ESTADOS DE DADOS ---
   const [employees, setEmployees] = useState(initialEmployees)
   const [filteredEmployees, setFilteredEmployees] = useState(initialEmployees)
@@ -90,7 +90,10 @@ export default function EmployeeClient({ initialEmployees, departments, location
   const eligibleForBasketCount = employees.filter((e: any) => 
     e.status === 'ATIVO' && Number(e.salary) <= BASKET_LIMIT
   ).length
-  const STATUS_TEMPORARIOS = ["AFASTADO INSS", "AFASTADO DOENCA", "FERIAS", "MATERNIDADE"]
+  // Status temporários são aqueles que têm datas de início e fim
+  const STATUS_TEMPORARIOS = statuses
+    .filter((s: any) => s.start_date || s.end_date)
+    .map((s: any) => s.name) || ["AFASTADO INSS", "AFASTADO DOENCA", "FERIAS", "MATERNIDADE"]
 
   // --- EFEITOS (FILTRAGEM E ORDENAÇÃO) ---
   useEffect(() => {
@@ -308,7 +311,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
               birthDate: excelDateToISO(row['Data de Nascimento'] || row['Nascimento'])
           }
       })
-      const validEmployees = parsedEmployees.filter((e: any) => e.id && e.id !== 'undefined' && e.name)
+      const validEmployees = parsedEmployees.filter((e: any) => e.id && e.id !== 'indefinido' && e.name)
       if (validEmployees.length === 0) { alert(`Erro: Nenhuma coluna "Matrícula" encontrada.`); setLoading(false); return }
       const res = await importEmployeesBatch(validEmployees, user.email || 'Admin')
       if (res.error) alert('Erro: ' + res.error)
@@ -795,7 +798,7 @@ export default function EmployeeClient({ initialEmployees, departments, location
                 <div className="col-span-1"><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Secretaria</label><select required className="w-full border p-2 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500" value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})}><option value="">Selecione...</option>{departments.map((d:any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
                 <div className="col-span-1"><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Filial</label><select required className="w-full border p-2 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})}><option value="">Selecione...</option>{locations.map((l:any) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
                 <div className="col-span-1"><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Salário Base</label><div className="relative"><DollarSign size={16} className="absolute left-3 top-2.5 text-slate-400"/><input type="number" step="0.01" required className="w-full border p-2 pl-9 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.salary} onChange={e => setFormData({...formData, salary: parseFloat(e.target.value)})} /></div></div>
-                <div className="col-span-1"><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label><select className="w-full border p-2 rounded-lg bg-white font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}><option value="ATIVO">ATIVO</option><option value="INATIVO">INATIVO</option><option value="MENOR APRENDIZ">MENOR APRENDIZ</option><option value="AFASTADO INSS">AFASTADO INSS</option><option value="AFASTADO DOENCA">AFASTADO DOENCA</option><option value="FERIAS">FERIAS</option><option value="MATERNIDADE">MATERNIDADE</option><option value="DEMITIDO">DEMITIDO</option><option value="AVISO PREVIO TRABALHADO">AVISO PRÉVIO TRABALHADO</option></select></div>
+                <div className="col-span-1"><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Status</label><select className="w-full border p-2 rounded-lg bg-white font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>{statuses && statuses.length > 0 ? (statuses.map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)) : (<><option value="ATIVO">ATIVO</option><option value="INATIVO">INATIVO</option><option value="MENOR APRENDIZ">MENOR APRENDIZ</option><option value="AFASTADO INSS">AFASTADO INSS</option><option value="AFASTADO DOENCA">AFASTADO DOENCA</option><option value="FERIAS">FERIAS</option><option value="MATERNIDADE">MATERNIDADE</option><option value="DEMITIDO">DEMITIDO</option><option value="AVISO PREVIO TRABALHADO">AVISO PRÉVIO TRABALHADO</option></>)}</select></div>
                 {STATUS_TEMPORARIOS.includes(formData.status) && (
                     <div className="col-span-1 sm:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200 mt-2">
                         <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><CalendarClock size={16} className="text-blue-600"/> Período do Evento</h4>

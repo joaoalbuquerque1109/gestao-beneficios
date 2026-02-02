@@ -168,3 +168,75 @@ export async function resetAdjustments(periodId: string, userEmail: string) {
   revalidatePath('/settings')
   return { success: true }
 }
+
+// --- 5. Gerenciamento de Status com Regras ---
+export async function saveEmployeeStatus(data: any, isNewStatus: boolean = true) {
+  const supabase = await createClient()
+  
+  try {
+    if (isNewStatus) {
+      // Criar novo status
+      const id = data.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, '_')
+      
+      const { error } = await supabase.from('employee_statuses').insert([{
+        id,
+        name: data.name.toUpperCase(),
+        description: data.description,
+        status: 'ATIVO',
+        includes_va_calculation: data.includes_va_calculation,
+        includes_basket_calculation: data.includes_basket_calculation,
+        exclusion_type: data.exclusion_type,
+        exclusion_percentage: data.exclusion_percentage,
+        start_date: data.start_date,
+        end_date: data.end_date,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      
+      if (error) return { error: error.message }
+    } else {
+      // Atualizar status existente
+      const { error } = await supabase
+        .from('employee_statuses')
+        .update({
+          description: data.description,
+          includes_va_calculation: data.includes_va_calculation,
+          includes_basket_calculation: data.includes_basket_calculation,
+          exclusion_type: data.exclusion_type,
+          exclusion_percentage: data.exclusion_percentage,
+          start_date: data.start_date,
+          end_date: data.end_date,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', data.id)
+      
+      if (error) return { error: error.message }
+    }
+
+    revalidatePath('/settings')
+    revalidatePath('/employees')
+    revalidatePath('/calculation')
+    
+    return { success: true }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+}
+
+export async function getEmployeeStatusesWithRules() {
+  const supabase = await createClient()
+  
+  try {
+    const { data, error } = await supabase
+      .from('employee_statuses')
+      .select('*')
+      .eq('status', 'ATIVO')
+      .order('name')
+    
+    if (error) return { data: [], error: error.message }
+    
+    return { data: data || [], error: null }
+  } catch (err: any) {
+    return { data: [], error: err.message }
+  }
+}

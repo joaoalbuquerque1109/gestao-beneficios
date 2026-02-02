@@ -12,6 +12,7 @@ interface CalcParams {
   basketLimit: number;
   periodId: string;
   adjustmentsTotal: number;
+  statusRules?: any; // Novas regras do status
 }
 
 export const calculateBenefit = (params: CalcParams) => {
@@ -25,7 +26,8 @@ export const calculateBenefit = (params: CalcParams) => {
     basketValue, 
     basketLimit, 
     periodId,
-    adjustmentsTotal
+    adjustmentsTotal,
+    statusRules
   } = params;
   
   // Se for Aviso Prévio Trabalhado, zera todos os benefícios
@@ -40,6 +42,33 @@ export const calculateBenefit = (params: CalcParams) => {
         }
     };
   }
+
+  // --- NOVAS REGRAS DE STATUS (Compatibilidade com banco de dados) ---
+  let includesVA = true;
+  let includesBasket = true;
+  let exclusionType = null; // 'TOTAL', 'PARTIAL', null
+  let exclusionPercentage = 0;
+
+  if (statusRules) {
+    includesVA = statusRules.includes_va_calculation !== false;
+    includesBasket = statusRules.includes_basket_calculation !== false;
+    exclusionType = statusRules.exclusion_type;
+    exclusionPercentage = statusRules.exclusion_percentage || 0;
+  }
+
+  // Se exclusão total, zera tudo
+  if (exclusionType === 'TOTAL') {
+    return {
+        daysWorked: 0,
+        vaValue: 0,
+        basketValue: 0,
+        total: 0 + adjustmentsTotal,
+        debug: {
+            message: `Status: ${employee.status} - Exclusão total conforme regras de status.`
+        }
+    };
+  }
+
   // ----------------------------------
 
   // 1. Regra de Admissão Proporcional (Baseada em dias úteis para o VA)
@@ -57,17 +86,26 @@ export const calculateBenefit = (params: CalcParams) => {
   }
 
   // 2. Cálculo VA (Mantém lógica de Dias Úteis - Tolerância 0)
-  const totalAbsencesForVA = unjustifiedAbsences + vacationDays + justifiedAbsences;
-  const vaPotential = effectiveDays * dailyValueVA;
-  const vaDiscount = totalAbsencesForVA * dailyValueVA;
-  const vaFinal = Math.max(0, vaPotential - vaDiscount);
+  let vaFinal = 0;
+  
+  if (includesVA) {
+    const totalAbsencesForVA = unjustifiedAbsences + vacationDays + justifiedAbsences;
+    const vaPotential = effectiveDays * dailyValueVA;
+    const vaDiscount = totalAbsencesForVA * dailyValueVA;
+    vaFinal = Math.max(0, vaPotential - vaDiscount);
+
+    // Aplicar exclusão parcial se configurada
+    if (exclusionType === 'PARTIAL' && exclusionPercentage > 0) {
+      vaFinal = vaFinal * (1 - exclusionPercentage / 100);
+    }
+  }
 
   // 3. Cálculo Cesta Básica (Base Comercial 30 Dias)
   let basketFinal = 0;
   let basketDaysToPay = 0;
   let discountableJustified = 0;
 
-  if (Number(employee.salary) <= basketLimit) {
+  if (includesBasket && Number(employee.salary) <= basketLimit) {
     
     // --- CONVERSÃO PARA BASE 30 ---
     const COMMERCIAL_MONTH = 30;
@@ -102,6 +140,11 @@ export const calculateBenefit = (params: CalcParams) => {
     else if (unjustifiedAbsences >= 3) penalty = 1.00;
 
     basketFinal = Math.max(0, baseValue * (1 - penalty));
+
+    // Aplicar exclusão parcial se configurada
+    if (exclusionType === 'PARTIAL' && exclusionPercentage > 0) {
+      basketFinal = basketFinal * (1 - exclusionPercentage / 100);
+    }
   }
 
   const totalFinal = vaFinal + basketFinal + adjustmentsTotal;
@@ -112,13 +155,19 @@ export const calculateBenefit = (params: CalcParams) => {
     basketValue: basketFinal,
     total: totalFinal, 
     debug: { 
-        totalAbsencesForVA, 
+        totalAbsencesForVA: unjustifiedAbsences + vacationDays + justifiedAbsences,
         unjustifiedAbsences, 
         justifiedAbsences, 
         discountableJustified, 
         vacationDays,
         adjustmentsTotal,
-        basketDaysToPay // Campo atualizado para debug (base 30)
+        basketDaysToPay, // Campo atualizado para debug (base 30)
+        statusRulesApplied: statusRules ? {
+          includesVA,
+          includesBasket,
+          exclusionType,
+          exclusionPercentage
+        } : null
     }
   };
 };
